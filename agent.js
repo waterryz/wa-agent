@@ -17,8 +17,8 @@ const KIMI_MAX_TOKENS = parseInt(process.env.KIMI_MAX_TOKENS || '4096', 10);
 const EMBED_MODEL = process.env.EMBED_MODEL || 'text-embedding-3-small';
 const STYLE_TOP_K = parseInt(process.env.RAG_TOP_K || '6', 10);
 const STYLE_MIN_SIM = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.3');
-const KNOW_TOP_K = parseInt(process.env.KNOW_TOP_K || '6', 10);
-const KNOW_MIN_SIM = parseFloat(process.env.KNOW_MIN_SIMILARITY || '0.25');
+const KNOW_TOP_K = parseInt(process.env.KNOW_TOP_K || '10', 10);
+const KNOW_MIN_SIM = parseFloat(process.env.KNOW_MIN_SIMILARITY || '0.2');
 
 function requireEnv(name) {
   if (!process.env[name]) {
@@ -94,7 +94,9 @@ function buildSystemPrompt({ examples, facts, firstTurn }) {
     `КАК ОТВЕЧАТЬ:`,
     `- Коротко и по-человечески, как в мессенджере, без официально-роботного стиля.`,
     `- По фактам (цены, условия, сервис, инспекции, договор) опирайся на блок ФАКТЫ ниже.`,
-    `- Тон и формулировки бери из блока ПРИМЕРЫ — это реальные ответы ${OWNER_NAME} (владельца). Перенимай манеру, но говори от себя как ${AGENT_NAME}, не выдавая себя за ${OWNER_NAME}.`,
+    `- Если ответ ЕСТЬ в блоке ФАКТЫ — дай его сразу, уверенно и конкретно (с числами и деталями). НЕ говори «уточню», «не знаю точно», «у всех по-разному» и НЕ передавай ${OWNER_NAME} то, что уже есть в ФАКТАХ.`,
+    `- НЕ выдумывай условия, скидки, исключения, цифры или обещания, которых нет в блоке ФАКТЫ.`,
+    `- Из блока ПРИМЕРЫ бери ТОЛЬКО тон и манеру речи ${OWNER_NAME}. НЕ переноси из примеров конкретные факты, цифры, условия и обещания — вся фактическая информация только из блока ФАКТЫ. Если чего-то нет в ФАКТЫ — не утверждай это, даже если похожее встречается в ПРИМЕРАХ. Говори от себя как ${AGENT_NAME}, не выдавая себя за ${OWNER_NAME}.`,
     `- Выдавай только текст сообщения, без кавычек и префиксов.`,
     ``,
     `КОГДА ПЕРЕДАВАТЬ ЧЕЛОВЕКУ (${OWNER_NAME}):`,
