@@ -12,6 +12,7 @@ const {
   buildSystemPrompt,
   generateReply,
   parseEscalation,
+  costOf,
 } = require('./agent');
 
 // Railway задаёт PORT сам; локально — WEB_PORT или 3000
@@ -39,16 +40,31 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const lastUser = turns[turns.length - 1].content;
-    const { examples, facts } = await retrieveContext(lastUser);
+    const { examples, facts, embedTokens } = await retrieveContext(lastUser);
     const firstTurn = !turns.some((m) => m.role === 'assistant');
-    const raw = await generateReply(buildSystemPrompt({ examples, facts, firstTurn }), turns);
+    const { text: raw, usage } = await generateReply(
+      buildSystemPrompt({ examples, facts, firstTurn }),
+      turns,
+    );
     const { text, escalate, reason } = parseEscalation(raw);
     const reply =
       text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '…');
 
     if (escalate) await store.addEscalation(null, 'Веб-чат', lastUser, reason);
 
-    res.json({ reply, escalated: escalate, reason, facts: facts.length, examples: examples.length });
+    const cost = costOf({
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      embedTokens,
+    });
+    res.json({
+      reply,
+      escalated: escalate,
+      reason,
+      facts: facts.length,
+      examples: examples.length,
+      usage: cost,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

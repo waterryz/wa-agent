@@ -19,6 +19,10 @@ const STYLE_TOP_K = parseInt(process.env.RAG_TOP_K || '6', 10);
 const STYLE_MIN_SIM = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.3');
 const KNOW_TOP_K = parseInt(process.env.KNOW_TOP_K || '10', 10);
 const KNOW_MIN_SIM = parseFloat(process.env.KNOW_MIN_SIMILARITY || '0.2');
+// Тарифы для подсчёта стоимости, $ за 1 млн токенов. Поставь свои из консоли Moonshot/OpenAI.
+const PRICE_IN = parseFloat(process.env.KIMI_PRICE_IN || '0.60'); // вход Kimi
+const PRICE_OUT = parseFloat(process.env.KIMI_PRICE_OUT || '2.50'); // выход Kimi (вкл. reasoning)
+const PRICE_EMBED = parseFloat(process.env.EMBED_PRICE || '0.02'); // эмбеддинги OpenAI
 
 function requireEnv(name) {
   if (!process.env[name]) {
@@ -36,15 +40,17 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 // ── Эмбеддинг ────────────────────────────────────────────────────────
 async function embed(text) {
   const res = await openai.embeddings.create({ model: EMBED_MODEL, input: text });
-  return res.data[0].embedding;
+  return { embedding: res.data[0].embedding, tokens: res.usage?.total_tokens || 0 };
 }
 
 // ── RAG: факты (knowledge) + стиль (conversations) одним эмбеддингом ──
 async function retrieveContext(text) {
   let examples = [];
   let facts = [];
+  let embedTokens = 0;
   try {
-    const embedding = await embed(text);
+    const { embedding, tokens } = await embed(text);
+    embedTokens = tokens;
     const [conv, know] = await Promise.all([
       supabase.rpc('match_conversations', {
         query_embedding: embedding,
@@ -64,7 +70,7 @@ async function retrieveContext(text) {
   } catch (e) {
     console.error('⚠️  Ошибка RAG:', e.message);
   }
-  return { examples, facts };
+  return { examples, facts, embedTokens };
 }
 
 // ── Подсказка для Kimi ───────────────────────────────────────────────
@@ -117,7 +123,20 @@ async function generateReply(systemPrompt, history) {
     messages,
     max_tokens: KIMI_MAX_TOKENS,
   });
-  return (res.choices[0]?.message?.content || '').trim();
+  return { text: (res.choices[0]?.message?.content || '').trim(), usage: res.usage || {} };
+}
+
+// Стоимость одного ответа в токенах и долларах
+function costOf({ promptTokens = 0, completionTokens = 0, embedTokens = 0 }) {
+  const usd =
+    (promptTokens * PRICE_IN + completionTokens * PRICE_OUT + embedTokens * PRICE_EMBED) / 1e6;
+  return {
+    in: promptTokens,
+    out: completionTokens,
+    embed: embedTokens,
+    tokens: promptTokens + completionTokens + embedTokens,
+    usd,
+  };
 }
 
 // Выделяет служебный маркер эскалации [[ESCALATE]] из ответа модели.
@@ -141,4 +160,5 @@ module.exports = {
   buildSystemPrompt,
   generateReply,
   parseEscalation,
+  costOf,
 };

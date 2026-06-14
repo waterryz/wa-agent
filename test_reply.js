@@ -14,18 +14,29 @@ const {
   buildSystemPrompt,
   generateReply,
   parseEscalation,
+  costOf,
 } = require('./agent');
 
 async function answerOnce(history) {
   const lastUser = history[history.length - 1].content;
-  const { examples, facts } = await retrieveContext(lastUser);
+  const { examples, facts, embedTokens } = await retrieveContext(lastUser);
   const firstTurn = !history.some((m) => m.role === 'assistant');
-  const raw = await generateReply(buildSystemPrompt({ examples, facts, firstTurn }), history);
+  const { text: raw, usage } = await generateReply(
+    buildSystemPrompt({ examples, facts, firstTurn }),
+    history,
+  );
   const { text, escalate, reason } = parseEscalation(raw);
   const shown = text || (escalate ? '(передаю вопрос Антону)' : '');
+  const c = costOf({
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    embedTokens,
+  });
   console.log(`🤖 ${AGENT_NAME} (Kimi): ${shown}`);
   if (escalate) console.log(`   🔔 эскалация → Антон: ${reason || '—'}`);
-  console.log(`   фактов: ${facts.length} · примеров стиля: ${examples.length}\n`);
+  console.log(
+    `   фактов: ${facts.length} · стиль: ${examples.length} · 🪙 ${c.tokens} ток (вход ${c.in}/выход ${c.out}) · $${c.usd.toFixed(4)}\n`,
+  );
   return text || shown;
 }
 

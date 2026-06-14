@@ -74,7 +74,15 @@ function render(){
     }
     let h = `<div class="msg a"><div class="col"><div class="bubble">${esc(m.content)}</div>`;
     if(m.escalated) h += `<div class="esc">🔔 передано Антону${m.reason ? ': ' + esc(m.reason) : ''}</div>`;
-    if(m.meta) h += `<div class="meta">${esc(m.meta)}</div>`;
+    const parts = [];
+    if(m.facts != null) parts.push(`факты ${m.facts} · стиль ${m.examples}`);
+    const u = m.usage;
+    if(u && u.tokens != null) parts.push(`🪙 ${u.tokens.toLocaleString('ru-RU')} ток`);
+    if(u && u.usd != null) parts.push(`$${u.usd.toFixed(4)}`);
+    if(parts.length){
+      const title = (u && u.in != null) ? ` title="вход ${u.in} · выход ${u.out} · эмбеддинг ${u.embed} токенов"` : '';
+      h += `<div class="meta"${title}>${esc(parts.join(' · '))}</div>`;
+    }
     return h + '</div></div>';
   }).join('');
   scrollDown();
@@ -109,7 +117,7 @@ async function send(){
     if(!r.ok){
       messages.push({ role:'assistant', content:'⚠️ Ошибка: ' + (d.error || r.statusText) });
     } else {
-      messages.push({ role:'assistant', content:d.reply, escalated:d.escalated, reason:d.reason, meta:`факты: ${d.facts} · стиль: ${d.examples}` });
+      messages.push({ role:'assistant', content:d.reply, escalated:d.escalated, reason:d.reason, facts:d.facts, examples:d.examples, usage:d.usage });
     }
   } catch(e){
     typing(false);
