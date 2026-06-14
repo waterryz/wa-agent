@@ -1,0 +1,25 @@
+{
+  "name": "wa-agent",
+  "version": "1.0.0",
+  "description": "WhatsApp AI агент, отвечающий в стиле Антона (Prime Fusion Inc). Генерация — Kimi (Moonshot), эмбеддинги — OpenAI, RAG — Supabase pgvector.",
+  "private": true,
+  "main": "bot.js",
+  "scripts": {
+    "start": "node web.js",
+    "web": "node web.js",
+    "bot": "node bot.js",
+    "ingest": "node ingest_docs.js",
+    "upload": "node parse_and_upload.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.22.2",
+    "openai": "^4.67.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
