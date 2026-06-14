@@ -12,7 +12,7 @@
     "upload": "node parse_and_upload.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
