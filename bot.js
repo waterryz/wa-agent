@@ -81,7 +81,8 @@ async function handleChat(chat) {
   const contactName = chat.name || 'клиент';
 
   const { examples, facts } = await retrieveContext(lastUser);
-  const systemPrompt = buildSystemPrompt({ examples, facts });
+  const firstTurn = !history.some((m) => m.role === 'assistant');
+  const systemPrompt = buildSystemPrompt({ examples, facts, firstTurn });
   const rawReply = await generateReply(systemPrompt, history);
   const { text, escalate, reason } = parseEscalation(rawReply);
   const finalText =

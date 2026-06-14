@@ -19,7 +19,8 @@ const {
 async function answerOnce(history) {
   const lastUser = history[history.length - 1].content;
   const { examples, facts } = await retrieveContext(lastUser);
-  const raw = await generateReply(buildSystemPrompt({ examples, facts }), history);
+  const firstTurn = !history.some((m) => m.role === 'assistant');
+  const raw = await generateReply(buildSystemPrompt({ examples, facts, firstTurn }), history);
   const { text, escalate, reason } = parseEscalation(raw);
   const shown = text || (escalate ? '(передаю вопрос Антону)' : '');
   console.log(`🤖 ${AGENT_NAME} (Kimi): ${shown}`);

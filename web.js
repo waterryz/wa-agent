@@ -40,7 +40,8 @@ app.post('/api/chat', async (req, res) => {
 
     const lastUser = turns[turns.length - 1].content;
     const { examples, facts } = await retrieveContext(lastUser);
-    const raw = await generateReply(buildSystemPrompt({ examples, facts }), turns);
+    const firstTurn = !turns.some((m) => m.role === 'assistant');
+    const raw = await generateReply(buildSystemPrompt({ examples, facts, firstTurn }), turns);
     const { text, escalate, reason } = parseEscalation(raw);
     const reply =
       text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '…');
