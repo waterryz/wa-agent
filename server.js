@@ -261,7 +261,7 @@ app.get('/qr', (req, res) => {
     <h1>Привязка WhatsApp</h1>
     <div id="statusWrap"><span class="status s-wait" id="status">Загрузка…</span></div>
     <div class="qrbox" id="qrbox"><div class="spin"></div></div>
-    <p id="hint">На телефоне отца: <b>WhatsApp → Настройки → Связанные устройства → Привязать устройство</b>, затем отсканируйте код.</p>
+    <p id="hint">На телефоне: <b>WhatsApp → Настройки → Связанные устройства → Привязать устройство</b>, затем отсканируйте код.</p>
     <a class="panel" href="/">← Перейти в панель управления</a>
   </div>
 <script>
