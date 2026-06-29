@@ -26,7 +26,7 @@ const {
 } = require('./agent');
 
 const PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3000', 10);
-const AUTO_REPLY = process.env.AUTO_REPLY === 'true';
+const AUTO_REPLY = true;
 const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '8000', 10);
 const ESCALATION_NUMBER = (process.env.ESCALATION_NUMBER || '').replace(/\D/g, '');
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ''; // секрет для админских эндпоинтов /assistant
