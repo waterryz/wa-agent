@@ -16,16 +16,18 @@
 const express = require('express');
 const core = require('./assistant_core');
 const astore = require('./assistant_store');
+const store = require('./store'); // старый слой: seen / blocked / escalations (для админки)
 
 /**
  * @param {object} deps
  * @param {function} [deps.sendTelegram]  async (chatId, text) => отправить в Telegram
  * @param {function} [deps.sendWhatsApp]  async (number, text) => отправить в WhatsApp
  * @param {function} [deps.onEscalation]  async ({channel,external_id,name,question,reason}) — лог эскалации (для совместимости со старой панелью)
+ * @param {function} [deps.onBlockedChange] async () => вызывается после изменения списка исключений (освежить кэш)
  * @param {string}   [deps.adminKey]      секрет для админских эндпоинтов
  */
 function createAssistantRouter(deps = {}) {
-  const { sendTelegram, sendWhatsApp, onEscalation, adminKey } = deps;
+  const { sendTelegram, sendWhatsApp, onEscalation, onBlockedChange, adminKey } = deps;
   const router = express.Router();
   router.use(express.json());
 
@@ -191,6 +193,54 @@ function createAssistantRouter(deps = {}) {
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // ───────────── WhatsApp: исключения и переданные вопросы (для админки) ─────────────
+  // Тот же функционал, что старая exceptions.html, но под защитой admin-ключа.
+
+  // Список текущих исключений.
+  router.get('/wa/exceptions', requireAdmin, async (req, res) => {
+    try { res.json(await store.listBlocked()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Недавние контакты (для выпадающего списка «Добавить из недавних»).
+  router.get('/wa/recent', requireAdmin, async (req, res) => {
+    try { res.json(await store.listSeen()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Добавить номер в исключения.
+  router.post('/wa/exceptions', requireAdmin, async (req, res) => {
+    try {
+      const { number, name } = req.body || {};
+      const row = await store.addBlocked(number, name);
+      if (typeof onBlockedChange === 'function') await onBlockedChange();
+      res.json(row);
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Убрать из исключений.
+  router.delete('/wa/exceptions/:id', requireAdmin, async (req, res) => {
+    try {
+      await store.removeBlocked(req.params.id);
+      if (typeof onBlockedChange === 'function') await onBlockedChange();
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Переданные человеку вопросы (эскалации).
+  router.get('/wa/escalations', requireAdmin, async (req, res) => {
+    try { res.json(await store.listEscalations()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Отметить эскалацию решённой.
+  router.post('/wa/escalations/:id/resolve', requireAdmin, async (req, res) => {
+    try {
+      await store.resolveEscalation(req.params.id);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   return router;

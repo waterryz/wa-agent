@@ -306,6 +306,8 @@ app.use(
     // Эскалации из веба/телеграма дублируем в старую панель «Переданные вопросы».
     onEscalation: ({ external_id, name, question, reason }) =>
       store.addEscalation(external_id, name, question, reason),
+    // При изменении исключений из админки сразу освежаем кэш (без ожидания фонового цикла).
+    onBlockedChange: refreshBlocked,
   }),
 );
 
