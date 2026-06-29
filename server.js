@@ -1,10 +1,13 @@
-// server.js — единый процесс для Railway: веб-панель + WhatsApp-бот + QR на странице.
+// server.js — единый процесс для Railway: веб-панель + WhatsApp-бот + QR + ОБЩЕЕ ЯДРО ИИ-ассистента.
 // Запуск: node server.js   (npm start)
 //
-// Зачем объединено: Railway запускает ОДНУ команду (один процесс). Раньше web.js и
-// bot.js жили отдельно — на Railway мог работать только один из них. Теперь оба
-// поднимаются вместе, а QR-код для привязки телефона показывается на /qr
-// (в логах Railway сканировать QR неудобно).
+// Зачем объединено: Railway запускает ОДНУ команду (один процесс). web.js и bot.js
+// жили отдельно — на Railway мог работать только один. Теперь оба поднимаются вместе,
+// QR показывается на /qr.
+//
+// НОВОЕ: подключено общее ядро ИИ-ассистента (/assistant/*). Через него ходят сайт и
+// Telegram-бот, а WhatsApp-поток теперь тоже пишет переписку в общие таблицы, так что
+// все чаты видны в админке и оператор может «забрать» любой диалог.
 
 require('dotenv').config();
 
@@ -13,21 +16,21 @@ const express = require('express');
 const QRCode = require('qrcode'); // генерация QR как data-URL картинки
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
-const store = require('./store');
+const store = require('./store'); // старый слой: seen/blocked/escalations
+const astore = require('./assistant_store'); // новый слой: диалоги/сообщения
+const core = require('./assistant_core'); // общий пайплайн обработки
+const { createAssistantRouter } = require('./assistant_routes');
 const {
   AGENT_NAME,
   OWNER_NAME,
-  retrieveContext,
-  buildSystemPrompt,
-  generateReply,
-  parseEscalation,
-  costOf,
 } = require('./agent');
 
 const PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3000', 10);
 const AUTO_REPLY = process.env.AUTO_REPLY === 'true';
 const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '8000', 10);
 const ESCALATION_NUMBER = (process.env.ESCALATION_NUMBER || '').replace(/\D/g, '');
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ''; // секрет для админских эндпоинтов /assistant
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // для доставки ответов оператора в Telegram
 const WA_WEB_VERSION_URL =
   process.env.WA_WEB_VERSION_URL ||
   'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1038673194-alpha.html';
@@ -37,8 +40,8 @@ const WA_WEB_VERSION_URL =
 // ─────────────────────────────────────────────────────────────────────────
 const waState = {
   status: 'starting', // starting | qr | authenticated | ready | disconnected | auth_failure
-  qr: null, // последний QR (строка)
-  qrDataUrl: null, // QR как картинка data:image/png;base64,...
+  qr: null,
+  qrDataUrl: null,
   updatedAt: Date.now(),
 };
 
@@ -62,7 +65,7 @@ async function refreshBlocked() {
 refreshBlocked();
 setInterval(refreshBlocked, 15000);
 
-// История чата → сообщения для модели (user/assistant)
+// История чата → сообщения для модели (user/assistant) — берётся из самого WhatsApp.
 async function buildHistory(chat) {
   const raw = await chat.fetchMessages({ limit: 16 });
   const turns = [];
@@ -95,7 +98,6 @@ function scheduleReply(chat) {
 }
 
 async function handleChat(chat) {
-  // FIX: number раньше не был определён в этой функции — при эскалации бот падал.
   const number = chat.id._serialized.replace(/@.*$/, '');
 
   const history = await buildHistory(chat);
@@ -106,14 +108,23 @@ async function handleChat(chat) {
   const lastUser = history[history.length - 1].content;
   const contactName = chat.name || 'клиент';
 
-  const { examples, facts } = await retrieveContext(lastUser);
-  const firstTurn = !history.some((m) => m.role === 'assistant');
-  const systemPrompt = buildSystemPrompt({ examples, facts, firstTurn });
-  const { text: rawReply } = await generateReply(systemPrompt, history);
-  const { text, escalate, reason } = parseEscalation(rawReply);
-  const finalText =
-    text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '');
+  // Через общее ядро: оно сохранит переписку в БД, учтёт режим оператора,
+  // прогонит RAG+Kimi и вернёт ответ. История берётся из самого WhatsApp.
+  const result = await core.processMessage({
+    channel: 'whatsapp',
+    external_id: number,
+    message: lastUser,
+    contact: { name: contactName },
+    historyOverride: history,
+  });
 
+  // Оператор забрал этот чат на себя → ИИ молчит.
+  if (result.operator_mode) {
+    console.log(`✋ ${contactName} — режим оператора, ИИ не отвечает`);
+    return;
+  }
+
+  const finalText = result.reply;
   if (!finalText) {
     console.log(`(пустой ответ для «${contactName}», пропускаю)`);
     return;
@@ -122,21 +133,21 @@ async function handleChat(chat) {
   console.log('\n────────────────────────────────────');
   console.log(`👤 ${contactName}: ${lastUser}`);
   console.log(`🤖 ${AGENT_NAME}: ${finalText}`);
-  console.log(`   фактов: ${facts.length} · примеров стиля: ${examples.length}`);
-  if (escalate) console.log(`   🔔 эскалация → ${OWNER_NAME}: ${reason || '—'}`);
+  console.log(`   фактов: ${result.facts} · примеров стиля: ${result.examples}`);
+  if (result.escalate) console.log(`   🔔 эскалация → ${OWNER_NAME}: ${result.reason || '—'}`);
 
-  if (escalate) {
-    await store.addEscalation(number, contactName, lastUser, reason);
+  if (result.escalate) {
+    await store.addEscalation(number, contactName, lastUser, result.reason);
   }
 
   if (AUTO_REPLY) {
     await chat.sendStateTyping();
     await chat.sendMessage(finalText);
     console.log('   ✅ отправлено');
-    if (escalate && ESCALATION_NUMBER) {
+    if (result.escalate && ESCALATION_NUMBER) {
       const notif =
         `🔔 Вопрос от ${contactName} (${number}), на который ИИ не ответил:\n` +
-        `«${lastUser}»\nПричина: ${reason || '—'}`;
+        `«${lastUser}»\nПричина: ${result.reason || '—'}`;
       try {
         await client.sendMessage(`${ESCALATION_NUMBER}@c.us`, notif);
         console.log(`   ↪️ уведомление отправлено ${OWNER_NAME}`);
@@ -154,16 +165,9 @@ const client = new Client({
   webVersionCache: { type: 'remote', remotePath: WA_WEB_VERSION_URL },
   puppeteer: {
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     executablePath:
-      process.env.CHROME_PATH ||
-      process.env.PUPPETEER_EXECUTABLE_PATH ||
-      undefined,
+      process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
   },
 });
 
@@ -198,7 +202,6 @@ client.on('auth_failure', (m) => {
 client.on('disconnected', (r) => {
   console.warn('⚠️  Отключено от WhatsApp:', r);
   setState({ status: 'disconnected', qr: null, qrDataUrl: null });
-  // Пытаемся переподключиться
   setTimeout(() => client.initialize().catch((e) => console.error('reinit:', e.message)), 5000);
 });
 
@@ -222,12 +225,49 @@ client.on('message', async (msg) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  ЧАСТЬ 2. Веб-сервер (панель + QR)
+//  Отправители для ответов оператора (используются роутером /assistant)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// WhatsApp: шлём напрямую через клиент в этом же процессе.
+async function sendWhatsApp(number, text) {
+  const digits = String(number).replace(/\D/g, '');
+  await client.sendMessage(`${digits}@c.us`, text);
+}
+
+// Telegram: бот живёт в отдельном (Python) сервисе, поэтому шлём напрямую через Bot API.
+async function sendTelegram(chatId, text) {
+  if (!TELEGRAM_BOT_TOKEN) {
+    throw new Error('TELEGRAM_BOT_TOKEN не задан — не могу отправить ответ оператора в Telegram');
+  }
+  const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+  const data = await r.json();
+  if (!data.ok) throw new Error('Telegram API: ' + (data.description || r.status));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ЧАСТЬ 2. Веб-сервер (панель + QR + ядро ассистента)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Общее ядро ИИ-ассистента: /assistant/chat, /assistant/conversations и т.д.
+app.use(
+  '/assistant',
+  createAssistantRouter({
+    sendTelegram,
+    sendWhatsApp,
+    adminKey: ADMIN_API_KEY,
+    // Эскалации из веба/телеграма дублируем в старую панель «Переданные вопросы».
+    onEscalation: ({ external_id, name, question, reason }) =>
+      store.addEscalation(external_id, name, question, reason),
+  }),
+);
 
 // ── Страница привязки WhatsApp с QR ────────────────────────────────────────
 app.get('/qr', (req, res) => {
@@ -309,7 +349,7 @@ app.get('/api/wa-status', (req, res) => {
   });
 });
 
-// ── Чат с Alex (тест без WhatsApp) ─────────────────────────────────────────
+// ── Чат с Alex (старый тестовый эндпоинт без сохранения — оставлен для совместимости) ──
 app.post('/api/chat', async (req, res) => {
   try {
     const turns = (Array.isArray(req.body && req.body.messages) ? req.body.messages : [])
@@ -326,6 +366,8 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: 'Нет сообщения пользователя' });
     }
 
+    const { retrieveContext, buildSystemPrompt, generateReply, parseEscalation, costOf } =
+      require('./agent');
     const lastUser = turns[turns.length - 1].content;
     const { examples, facts, embedTokens } = await retrieveContext(lastUser);
     const firstTurn = !turns.some((m) => m.role === 'assistant');
@@ -337,7 +379,7 @@ app.post('/api/chat', async (req, res) => {
     const reply =
       text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '…');
 
-    if (escalate) await store.addEscalation(null, 'Веб-чат', lastUser, reason);
+    if (escalate) await store.addEscalation(null, 'Веб-чат (тест)', lastUser, reason);
 
     const cost = costOf({
       promptTokens: usage.prompt_tokens,
@@ -378,6 +420,7 @@ app.post('/api/escalations/:id/resolve', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🌐 Веб-панель:  http://localhost:${PORT}/`);
   console.log(`📱 Привязка WA: http://localhost:${PORT}/qr`);
+  console.log(`🤖 Ядро ассистента: POST http://localhost:${PORT}/assistant/chat`);
 });
 
 console.log('🚀 Инициализирую WhatsApp...');
