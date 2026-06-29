@@ -26,7 +26,7 @@ const {
 } = require('./agent');
 
 const PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3000', 10);
-const AUTO_REPLY = true;
+const AUTO_REPLY = process.env.AUTO_REPLY === 'true';
 const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '8000', 10);
 const ESCALATION_NUMBER = (process.env.ESCALATION_NUMBER || '').replace(/\D/g, '');
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ''; // секрет для админских эндпоинтов /assistant
@@ -53,7 +53,9 @@ function setState(patch) {
 //  ЧАСТЬ 1. WhatsApp-бот
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Кэш исключений (кому бот не отвечает). Обновляется из Supabase раз в 15 сек.
+// Исключения проверяются напрямую в Supabase прямо перед ответом (isBlockedFresh) —
+// мгновенно, без задержки кэша. Кэш blockedSet нужен лишь как быстрый ранний отсев
+// во входящем обработчике и как запасной вариант, если база недоступна.
 let blockedSet = new Set();
 async function refreshBlocked() {
   try {
@@ -62,8 +64,21 @@ async function refreshBlocked() {
     console.error('⚠️  Не удалось обновить список исключений:', e.message);
   }
 }
+// Точная проверка прямо перед ответом: спрашиваем Supabase напрямую (свежий список),
+// заодно освежаем кэш. Если база недоступна — откатываемся на кэш, чтобы не зависнуть.
+async function isBlockedFresh(number) {
+  try {
+    const set = await store.blockedNumbers();
+    blockedSet = set;
+    return set.has(number);
+  } catch (e) {
+    console.error('⚠️  Проверка исключений не удалась, использую кэш:', e.message);
+    return blockedSet.has(number);
+  }
+}
 refreshBlocked();
-setInterval(refreshBlocked, 15000);
+// Фоновый опрос — лёгкая страховка на случай правок в базе мимо панели (раз в минуту).
+setInterval(refreshBlocked, 60000);
 
 // История чата → сообщения для модели (user/assistant) — берётся из самого WhatsApp.
 async function buildHistory(chat) {
@@ -99,6 +114,13 @@ function scheduleReply(chat) {
 
 async function handleChat(chat) {
   const number = chat.id._serialized.replace(/@.*$/, '');
+
+  // Точная проверка прямо перед ответом — напрямую в Supabase (мгновенно, без задержки кэша).
+  // Закрывает и окно дебаунса: номер мог попасть в исключения, пока висел таймер.
+  if (await isBlockedFresh(number)) {
+    console.log(`⛔ ${chat.name || number} — в исключениях, не отвечаю`);
+    return;
+  }
 
   const history = await buildHistory(chat);
   if (!history.length || history[history.length - 1].role !== 'user') {
@@ -399,12 +421,19 @@ app.get('/api/blocked', async (req, res) => {
   try { res.json(await store.listBlocked()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/blocked', async (req, res) => {
-  try { const { number, name } = req.body || {}; res.json(await store.addBlocked(number, name)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    const { number, name } = req.body || {};
+    const result = await store.addBlocked(number, name);
+    await refreshBlocked(); // применяем сразу, не ждём 15-секундный цикл
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.delete('/api/blocked/:id', async (req, res) => {
-  try { await store.removeBlocked(req.params.id); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  try {
+    await store.removeBlocked(req.params.id);
+    await refreshBlocked();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/escalations', async (req, res) => {
   try { res.json(await store.listEscalations()); } catch (e) { res.status(500).json({ error: e.message }); }
