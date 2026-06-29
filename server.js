@@ -227,6 +227,9 @@ client.on('disconnected', (r) => {
   setTimeout(() => client.initialize().catch((e) => console.error('reinit:', e.message)), 5000);
 });
 
+// Запоминаем настоящий id чата (@c.us или @lid), чтобы ответ оператора уходил именно туда.
+const waChatIds = new Map(); // digits -> полный _serialized id
+
 client.on('message', async (msg) => {
   try {
     if (msg.from === 'status@broadcast') return;
@@ -234,6 +237,7 @@ client.on('message', async (msg) => {
     if (chat.isGroup) return;
 
     const number = chat.id._serialized.replace(/@.*$/, '');
+    waChatIds.set(number, chat.id._serialized);
     store.recordContact(number, chat.name).catch(() => {});
 
     if (blockedSet.has(number)) {
@@ -251,9 +255,23 @@ client.on('message', async (msg) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // WhatsApp: шлём напрямую через клиент в этом же процессе.
+// Важно: у контакта может быть id вида @lid (а не телефон @c.us). Поэтому сначала берём
+// настоящий id чата, запомненный из входящего сообщения; если его нет — пробуем определить
+// по номеру через getNumberId, и лишь в крайнем случае клеим @c.us.
 async function sendWhatsApp(number, text) {
-  const digits = String(number).replace(/\D/g, '');
-  await client.sendMessage(`${digits}@c.us`, text);
+  const raw = String(number || '');
+  let chatId = raw.includes('@') ? raw : waChatIds.get(raw.replace(/\D/g, '')) || null;
+  if (!chatId) {
+    const digits = raw.replace(/\D/g, '');
+    try {
+      const nid = await client.getNumberId(digits);
+      if (nid && nid._serialized) chatId = nid._serialized;
+    } catch (e) {
+      /* getNumberId может не сработать для @lid — игнорируем */
+    }
+    if (!chatId) chatId = `${digits}@c.us`;
+  }
+  await client.sendMessage(chatId, text);
 }
 
 // Telegram: бот живёт в отдельном (Python) сервисе, поэтому шлём напрямую через Bot API.
