@@ -26,7 +26,9 @@ const {
 } = require('./agent');
 
 const PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3000', 10);
-const AUTO_REPLY = process.env.AUTO_REPLY === 'true';
+// Устойчивый парсинг: принимаем true/1/yes/on в любом регистре и с пробелами,
+// чтобы не споткнуться о "true" в кавычках, " true" с пробелом или "True".
+const AUTO_REPLY = /^(true|1|yes|on)$/i.test(String(process.env.AUTO_REPLY || '').trim());
 const DEBOUNCE_MS = parseInt(process.env.DEBOUNCE_MS || '8000', 10);
 const ESCALATION_NUMBER = (process.env.ESCALATION_NUMBER || '').replace(/\D/g, '');
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || ''; // секрет для админских эндпоинтов /assistant
@@ -212,7 +214,7 @@ client.on('authenticated', () => {
 });
 
 client.on('ready', () => {
-  console.log(`✅ Бот готов. AUTO_REPLY=${AUTO_REPLY ? 'ON' : 'OFF'}`);
+  console.log(`✅ Бот готов. AUTO_REPLY=${AUTO_REPLY ? 'ON' : 'OFF'} (получено из env: ${JSON.stringify(process.env.AUTO_REPLY)})`);
   setState({ status: 'ready', qr: null, qrDataUrl: null });
 });
 
