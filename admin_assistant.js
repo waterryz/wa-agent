@@ -172,7 +172,8 @@ async function adminChat(userMessage, history = []) {
 
   const changes = [];
 
-  for (let step = 0; step < 6; step++) {
+  // До 15 кругов «модель ↔ инструменты» — хватает на списки из нескольких пунктов.
+  for (let step = 0; step < 15; step++) {
     const resp = await kimi.chat.completions.create({
       model: KIMI_MODEL,
       messages,
@@ -221,10 +222,32 @@ async function adminChat(userMessage, history = []) {
     }
   }
 
-  return {
-    reply: 'Не удалось завершить за отведённое число шагов — попробуй переформулировать запрос.',
-    changes,
-  };
+  // Круги кончились — просим модель дать финальный текстовый ответ БЕЗ инструментов,
+  // чтобы вместо «—» пришёл нормальный отчёт о том, что уже сделано.
+  try {
+    messages.push({
+      role: 'user',
+      content:
+        'Заверши: кратко на русском отчитайся, что уже сделано (какие факты добавлены/изменены/удалены), ' +
+        'и если что-то осталось незавершённым — скажи, что попросить отдельным сообщением. Без вызова инструментов.',
+    });
+    const final = await kimi.chat.completions.create({
+      model: KIMI_MODEL,
+      messages,
+      tool_choice: 'none',
+      max_tokens: 1024,
+    });
+    const text = (final.choices[0].message.content || '').trim();
+    return { reply: text || 'Готово. Проверь список изменений ниже.', changes };
+  } catch (e) {
+    return {
+      reply:
+        changes.length > 0
+          ? 'Часть изменений внесена (см. список ниже). Если что-то осталось — пришли отдельным сообщением.'
+          : 'Не удалось завершить за отведённое число шагов — попробуй переформулировать или разбить на части.',
+      changes,
+    };
+  }
 }
 
 module.exports = { adminChat };
