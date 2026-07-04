@@ -17,6 +17,7 @@ const express = require('express');
 const core = require('./assistant_core');
 const astore = require('./assistant_store');
 const store = require('./store'); // старый слой: seen / blocked / escalations (для админки)
+const adminAssistant = require('./admin_assistant'); // ИИ-редактор базы знаний (админский чат)
 
 /**
  * @param {object} deps
@@ -241,6 +242,22 @@ function createAssistantRouter(deps = {}) {
       await store.resolveEscalation(req.params.id);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ───────────── ИИ-редактор базы знаний (админский чат) ─────────────
+  // Работает ТОЛЬКО по тексту, который админ вводит здесь. Клиентские сообщения
+  // и эскалации сюда не попадают.
+  router.post('/admin-chat', requireAdmin, async (req, res) => {
+    try {
+      const { message, history } = req.body || {};
+      if (!message || !String(message).trim()) {
+        return res.status(400).json({ error: 'message пустой' });
+      }
+      const out = await adminAssistant.adminChat(String(message), Array.isArray(history) ? history : []);
+      res.json(out);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   return router;
