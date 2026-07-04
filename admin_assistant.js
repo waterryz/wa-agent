@@ -178,7 +178,6 @@ async function adminChat(userMessage, history = []) {
       messages,
       tools: TOOLS,
       tool_choice: 'auto',
-      temperature: 0.2,
       max_tokens: 4096,
     });
     const msg = resp.choices[0].message;
