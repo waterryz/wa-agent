@@ -18,8 +18,9 @@ const KIMI_BASE_URL = process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1';
 const KIMI_MAX_TOKENS = 8192;
 const EMBED_MODEL = process.env.EMBED_MODEL || 'text-embedding-3-small';
 // Модель для перевода иноязычных запросов на русский ПЕРЕД поиском по базе
-// (факты хранятся на русском). Дёшево и быстро; можно переопределить через env.
-const TRANSLATE_MODEL = process.env.TRANSLATE_MODEL || 'gpt-4o-mini';
+// (факты хранятся на русском). По умолчанию та же Kimi, что и для ответов —
+// чтобы не тянуть отдельную модель. Можно переопределить через env.
+const TRANSLATE_MODEL = process.env.TRANSLATE_MODEL || KIMI_MODEL;
 const STYLE_TOP_K = parseInt(process.env.RAG_TOP_K || '6', 10);
 const STYLE_MIN_SIM = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.3');
 // Фиксировано в коде (НЕ из env), чтобы не зависеть от устаревших переменных на хостинге
@@ -61,15 +62,16 @@ function hasCyrillic(s) {
 // При любой ошибке возвращаем исходный текст — поиск деградирует, но не падает.
 async function translateForRetrieval(text) {
   try {
-    const res = await openai.chat.completions.create({
+    // Та же Kimi, что и для ответов. ВАЖНО: kimi-k2.6 принимает только
+    // temperature=1 (иначе HTTP 400) — параметр не передаём вообще.
+    const res = await kimi.chat.completions.create({
       model: TRANSLATE_MODEL,
-      temperature: 0,
-      max_tokens: 512,
+      max_tokens: 1024,
       messages: [
         {
           role: 'system',
           content:
-            'Translate the user message to Russian. Output ONLY the translation, no quotes, no notes.',
+            'Переведи сообщение пользователя на русский язык. Выведи ТОЛЬКО перевод, без кавычек и пояснений.',
         },
         { role: 'user', content: text },
       ],
