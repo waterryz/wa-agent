@@ -17,6 +17,9 @@ const KIMI_BASE_URL = process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1';
 // при 4096 сложные ответы обрывались в пустоту — даём запас.
 const KIMI_MAX_TOKENS = 8192;
 const EMBED_MODEL = process.env.EMBED_MODEL || 'text-embedding-3-small';
+// Модель для перевода иноязычных запросов на русский ПЕРЕД поиском по базе
+// (факты хранятся на русском). Дёшево и быстро; можно переопределить через env.
+const TRANSLATE_MODEL = process.env.TRANSLATE_MODEL || 'gpt-4o-mini';
 const STYLE_TOP_K = parseInt(process.env.RAG_TOP_K || '6', 10);
 const STYLE_MIN_SIM = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.3');
 // Фиксировано в коде (НЕ из env), чтобы не зависеть от устаревших переменных на хостинге
@@ -46,13 +49,47 @@ async function embed(text) {
   return { embedding: res.data[0].embedding, tokens: res.usage?.total_tokens || 0 };
 }
 
+// Грубая проверка на русский: есть ли кириллица. Русский (и близкие кириллические)
+// запросы ищем как есть; всё остальное сперва переводим на русский.
+function hasCyrillic(s) {
+  return /[а-яёА-ЯЁ]/.test(s || '');
+}
+
+// Переводит иноязычный запрос на русский ТОЛЬКО для поиска по базе (факты на
+// русском; кросс-язычная похожесть эмбеддингов слабее и факты проваливаются
+// мимо порога). Ответ клиенту всё равно формируется на его языке.
+// При любой ошибке возвращаем исходный текст — поиск деградирует, но не падает.
+async function translateForRetrieval(text) {
+  try {
+    const res = await openai.chat.completions.create({
+      model: TRANSLATE_MODEL,
+      temperature: 0,
+      max_tokens: 512,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Translate the user message to Russian. Output ONLY the translation, no quotes, no notes.',
+        },
+        { role: 'user', content: text },
+      ],
+    });
+    return (res.choices[0]?.message?.content || '').trim() || text;
+  } catch (e) {
+    console.error('⚠️  Перевод запроса для поиска не удался:', e.message);
+    return text;
+  }
+}
+
 // ── RAG: факты (knowledge) + стиль (conversations) одним эмбеддингом ──
 async function retrieveContext(text) {
   let examples = [];
   let facts = [];
   let embedTokens = 0;
   try {
-    const { embedding, tokens } = await embed(text);
+    // Иноязычный запрос переводим на русский, чтобы находить русские факты/примеры.
+    const queryForEmbed = hasCyrillic(text) ? text : await translateForRetrieval(text);
+    const { embedding, tokens } = await embed(queryForEmbed);
     embedTokens = tokens;
     const [conv, know] = await Promise.all([
       supabase.rpc('match_conversations', {
