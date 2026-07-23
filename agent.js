@@ -1,14 +1,13 @@
 // «Мозг» бота: клиенты, RAG (факты + стиль) и генерация ответа через Kimi.
 // Используется и ботом (bot.js), и тестовым скриптом (test_reply.js).
-
 require('dotenv').config();
-
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 
 // ── Конфиг ───────────────────────────────────────────────────────────
 const AGENT_NAME = process.env.AGENT_NAME || 'Alex'; // имя ИИ-ассистента
 const OWNER_NAME = process.env.OWNER_NAME || 'Антон'; // владелец, чей стиль перенимаем
+
 const KIMI_MODEL = process.env.KIMI_MODEL || 'kimi-k2.6';
 const KIMI_BASE_URL = process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1';
 // kimi-k2.6 — «думающая» модель: reasoning тоже тратит выходные токены,
@@ -16,16 +15,19 @@ const KIMI_BASE_URL = process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1';
 // Зашито в код (env игнорим): kimi-k2.6 тратит токены на reasoning,
 // при 4096 сложные ответы обрывались в пустоту — даём запас.
 const KIMI_MAX_TOKENS = 8192;
+
 const EMBED_MODEL = process.env.EMBED_MODEL || 'text-embedding-3-small';
 // Модель для перевода иноязычных запросов на русский ПЕРЕД поиском по базе
 // (факты хранятся на русском). По умолчанию та же Kimi, что и для ответов —
 // чтобы не тянуть отдельную модель. Можно переопределить через env.
 const TRANSLATE_MODEL = process.env.TRANSLATE_MODEL || KIMI_MODEL;
+
 const STYLE_TOP_K = parseInt(process.env.RAG_TOP_K || '6', 10);
 const STYLE_MIN_SIM = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.3');
 // Фиксировано в коде (НЕ из env), чтобы не зависеть от устаревших переменных на хостинге
 const KNOW_TOP_K = 10;
 const KNOW_MIN_SIM = 0.2;
+
 // Тарифы для подсчёта стоимости, $ за 1 млн токенов. Поставь свои из консоли Moonshot/OpenAI.
 const PRICE_IN = parseFloat(process.env.KIMI_PRICE_IN || '0.60'); // вход Kimi
 const PRICE_OUT = parseFloat(process.env.KIMI_PRICE_OUT || '2.50'); // выход Kimi (вкл. reasoning)
@@ -83,17 +85,43 @@ async function translateForRetrieval(text) {
   }
 }
 
+// ── Admin-факты: приоритетный источник ───────────────────────────────
+// Всегда тянем строки с source = 'admin' НАПРЯМУЮ (без вектора). Их вносят
+// руками в Supabase и часто БЕЗ эмбеддинга — поэтому match_knowledge их не
+// находит и бот отвечает «нет в базе», хотя строка есть. Прямая выборка чинит
+// это и одновременно делает admin-факты приоритетными: они всегда в контексте,
+// независимо от векторной похожести к запросу.
+async function fetchAdminFacts(limit = 100) {
+  try {
+    const { data, error } = await supabase
+      .from('knowledge')
+      .select('content')
+      .eq('source', 'admin')
+      .order('id', { ascending: true })
+      .limit(limit);
+    if (error) {
+      console.error('⚠️  Загрузка admin-фактов:', error.message);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    console.error('⚠️  Загрузка admin-фактов:', e.message);
+    return [];
+  }
+}
+
 // ── RAG: факты (knowledge) + стиль (conversations) одним эмбеддингом ──
 async function retrieveContext(text) {
   let examples = [];
-  let facts = [];
+  let vectorFacts = [];
+  let adminFacts = [];
   let embedTokens = 0;
   try {
     // Иноязычный запрос переводим на русский, чтобы находить русские факты/примеры.
     const queryForEmbed = hasCyrillic(text) ? text : await translateForRetrieval(text);
     const { embedding, tokens } = await embed(queryForEmbed);
     embedTokens = tokens;
-    const [conv, know] = await Promise.all([
+    const [conv, know, admin] = await Promise.all([
       supabase.rpc('match_conversations', {
         query_embedding: embedding,
         match_threshold: STYLE_MIN_SIM,
@@ -104,22 +132,51 @@ async function retrieveContext(text) {
         match_threshold: KNOW_MIN_SIM,
         match_count: KNOW_TOP_K,
       }),
+      fetchAdminFacts(), // admin — всегда, минуя вектор
     ]);
     if (conv.error) console.error('⚠️  match_conversations:', conv.error.message);
     else examples = conv.data || [];
     if (know.error) console.error('⚠️  match_knowledge:', know.error.message);
-    else facts = know.data || [];
+    else vectorFacts = know.data || [];
+    adminFacts = admin || [];
   } catch (e) {
     console.error('⚠️  Ошибка RAG:', e.message);
   }
+
+  // Приоритет admin: сначала admin-факты (priority: true), затем векторные факты
+  // без дублей по содержимому и без повторного admin (если RPC его всё же вернул).
+  const adminSet = new Set(adminFacts.map((f) => (f.content || '').trim()));
+  const facts = [
+    ...adminFacts.map((f) => ({ content: f.content, priority: true })),
+    ...vectorFacts
+      .filter((f) => f.source !== 'admin')
+      .filter((f) => !adminSet.has((f.content || '').trim()))
+      .map((f) => ({ content: f.content, priority: false })),
+  ];
+
   return { examples, facts, embedTokens };
 }
 
 // ── Подсказка для Kimi ───────────────────────────────────────────────
 function buildSystemPrompt({ examples, facts, firstTurn }) {
+  const adminFacts = facts.filter((f) => f.priority);
+  const otherFacts = facts.filter((f) => !f.priority);
+
   const factsBlock = facts.length
-    ? `ФАКТЫ О КОМПАНИИ Prime Fusion (опирайся только на них, не выдумывай):\n\n` +
-      facts.map((f) => `• ${f.content}`).join('\n\n')
+    ? [
+        `ФАКТЫ О КОМПАНИИ Prime Fusion (опирайся только на них, не выдумывай):`,
+        adminFacts.length
+          ? `⭐ ПРИОРИТЕТНЫЕ ФАКТЫ ОТ АДМИНИСТРАТОРА (высший приоритет — при любом ` +
+            `противоречии с остальными фактами, брошюрой, договором или примерами ` +
+            `верь ИМЕННО ЭТИМ строкам):\n\n` +
+            adminFacts.map((f) => `• ${f.content}`).join('\n\n')
+          : '',
+        otherFacts.length
+          ? `ОСТАЛЬНЫЕ ФАКТЫ:\n\n` + otherFacts.map((f) => `• ${f.content}`).join('\n\n')
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n')
     : '';
 
   const examplesBlock = examples.length
@@ -153,7 +210,7 @@ function buildSystemPrompt({ examples, facts, firstTurn }) {
     `- Если в ФАКТАХ есть конкретные цены, тарифы или цифры — ОБЯЗАТЕЛЬНО назови их, даже если рядом есть оговорка, что цена «согласуется индивидуально» или «не фиксируется в договоре». Эта оговорка значит лишь, что итог можно скорректировать. Никогда не говори, что у компании «нет тарифов/планов/фиксированных цен» — базовые тарифы есть всегда, назови их, а не отправляй к ${OWNER_NAME}.`,
     `- Не выдумывай условий, скидок, цифр или обещаний, которых нет в блоке ФАКТЫ. Если в ФАКТАХ есть бонус (например, бесплатная неделя за 6 месяцев аренды) — о нём сказать можно; скидок и акций, которых в ФАКТАХ нет, не предлагай, даже если они встречаются в ПРИМЕРАХ (старые переписки).`,
     `- НЕ раскрывай клиенту внутреннюю/служебную информацию компании: названия и стоимость страховых компаний и брокеров (например ATIK, Hereford, Transit General, проценты, $/год, $/мес), закупочные цены машин, стоимость WAV-конверсии, маржу, экономику бизнеса. На вопрос «сколько стоит страховка» отвечай: full coverage входит в аренду, отдельно платить не нужно; при своей вине — deductible $1000. Без сумм страховых взносов, названий страховых и закупочных/конверсионных затрат.`,
-    `- При расхождении данных приоритет у договора и официальной рассылки; сведения, помеченные как из старых переписок, могут быть устаревшими.`,
+    `- При расхождении данных приоритет у ПРИОРИТЕТНЫХ ФАКТОВ ОТ АДМИНИСТРАТОРА, затем у договора и официальной рассылки; сведения, помеченные как из старых переписок, могут быть устаревшими.`,
     `- Из блока ПРИМЕРЫ бери ТОЛЬКО тон и манеру речи ${OWNER_NAME}. НЕ переноси из примеров конкретные факты, цифры, условия и обещания — вся фактическая информация только из блока ФАКТЫ. Если чего-то нет в ФАКТЫ — не утверждай это, даже если похожее встречается в ПРИМЕРАХ. Говори от себя как ${AGENT_NAME}, не выдавая себя за ${OWNER_NAME}.`,
     `- Выдавай только текст сообщения, без кавычек и префиксов.`,
     ``,
