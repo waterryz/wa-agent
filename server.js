@@ -8,6 +8,10 @@
 // НОВОЕ: подключено общее ядро ИИ-ассистента (/assistant/*). Через него ходят сайт и
 // Telegram-бот, а WhatsApp-поток теперь тоже пишет переписку в общие таблицы, так что
 // все чаты видны в админке и оператор может «забрать» любой диалог.
+//
+// НОВОЕ: приём фото. Изображения скачиваются из WhatsApp, сжимаются (sharp) и уходят
+// в ядро как base64; ядро делает vision-вызов и дальше работает с ТЕКСТОМ описания.
+// В историю диалога base64 не попадает никогда.
 
 require('dotenv').config();
 
@@ -16,6 +20,15 @@ const express = require('express');
 const QRCode = require('qrcode'); // генерация QR как data-URL картинки
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
+// sharp — опционально: если пакет не установлен, фото уйдут без сжатия
+// (дороже по входным токенам, но работать всё равно будет).
+let sharp = null;
+try {
+  sharp = require('sharp');
+} catch (_) {
+  console.warn('⚠️  sharp не установлен — фото уйдут в модель без сжатия (дороже). npm i sharp');
+}
+
 const store = require('./store'); // старый слой: seen/blocked/escalations
 const astore = require('./assistant_store'); // новый слой: диалоги/сообщения
 const core = require('./assistant_core'); // общий пайплайн обработки
@@ -23,6 +36,7 @@ const { createAssistantRouter } = require('./assistant_routes');
 const {
   AGENT_NAME,
   OWNER_NAME,
+  VISION_MAX_IMAGES,
 } = require('./agent');
 
 const PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3000', 10);
@@ -36,6 +50,12 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''; // для до�
 const WA_WEB_VERSION_URL =
   process.env.WA_WEB_VERSION_URL ||
   'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1038673194-alpha.html';
+
+// ── Настройки фото ─────────────────────────────────────────────────────────
+const PHOTO_MAX_SIDE = parseInt(process.env.PHOTO_MAX_SIDE || '1280', 10); // px, длинная сторона
+const PHOTO_JPEG_QUALITY = parseInt(process.env.PHOTO_JPEG_QUALITY || '80', 10);
+const PHOTO_MAX_BYTES = parseInt(process.env.PHOTO_MAX_BYTES || String(20 * 1024 * 1024), 10);
+const PHOTO_RATE_PER_HOUR = parseInt(process.env.PHOTO_RATE_PER_HOUR || '20', 10); // фото/час на номер
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Состояние WhatsApp-подключения (для отображения на /qr)
@@ -82,12 +102,167 @@ refreshBlocked();
 // Фоновый опрос — лёгкая страховка на случай правок в базе мимо панели (раз в минуту).
 setInterval(refreshBlocked, 60000);
 
-// История чата → сообщения для модели (user/assistant) — берётся из самого WhatsApp.
-async function buildHistory(chat) {
+// ── Медиа: буфер входящих вложений и лимиты ────────────────────────────────
+
+// chatId -> [Message] — вложения, пришедшие за окно дебаунса.
+// Держим сами объекты сообщений: качать медиа будем один раз, в handleChat.
+const pendingMedia = new Map();
+
+function pushPendingMedia(chatId, msg) {
+  const list = pendingMedia.get(chatId) || [];
+  list.push(msg);
+  pendingMedia.set(chatId, list);
+}
+
+function drainPendingMedia(chatId) {
+  const list = pendingMedia.get(chatId) || [];
+  pendingMedia.delete(chatId);
+  return list;
+}
+
+// Текст, пришедший за это окно дебаунса отдельными сообщениями. Нужен, чтобы
+// (а) заглушка про голосовое/стикер не проглотила написанный рядом вопрос,
+// (б) вопрос, отправленный сразу ПОСЛЕ фото, попал в vision-вызов и в RAG.
+const pendingText = new Map(); // chatId -> [строки]
+function pushPendingText(chatId, text) {
+  const list = pendingText.get(chatId) || [];
+  list.push(text);
+  pendingText.set(chatId, list);
+}
+function drainPendingText(chatId) {
+  const list = pendingText.get(chatId) || [];
+  pendingText.delete(chatId);
+  return list;
+}
+
+// Текстовый след разобранных фото: chatId -> Map(msgId, trace).
+// Без него на СЛЕДУЮЩЕМ сообщении история из WhatsApp вернёт голое «[Фото]»,
+// и модель забудет, что именно было на снимке.
+const photoTraces = new Map();
+const PHOTO_TRACE_KEEP = 20; // сколько следов держим на чат
+function rememberPhotoTrace(chatId, msgIds, trace) {
+  const map = photoTraces.get(chatId) || new Map();
+  msgIds.forEach((id, i) => {
+    if (id) map.set(id, i === 0 ? trace : ''); // след кладём на первое фото пачки
+  });
+  while (map.size > PHOTO_TRACE_KEEP) map.delete(map.keys().next().value);
+  photoTraces.set(chatId, map);
+}
+
+// Простой счётчик фото на номер в час — защита от альбома на 30 кадров.
+const photoRate = new Map(); // number -> { count, resetAt }
+function takePhotoQuota(number, want) {
+  const now = Date.now();
+  const rec = photoRate.get(number);
+  if (!rec || now >= rec.resetAt) {
+    photoRate.set(number, { count: want, resetAt: now + 3600000 });
+    return Math.min(want, PHOTO_RATE_PER_HOUR);
+  }
+  const left = Math.max(0, PHOTO_RATE_PER_HOUR - rec.count);
+  const take = Math.min(want, left);
+  rec.count += take;
+  return take;
+}
+// Возврат квоты за картинки, которые так и не удалось скачать/распознать —
+// иначе битый файл «съедает» лимит клиента ни за что.
+function refundPhotoQuota(number, n) {
+  const rec = photoRate.get(number);
+  if (rec && n > 0) rec.count = Math.max(0, rec.count - n);
+}
+// Чистим протухшие счётчики, чтобы Map не рос бесконечно на долгоживущем процессе.
+setInterval(() => {
+  const now = Date.now();
+  for (const [num, rec] of photoRate) if (now >= rec.resetAt) photoRate.delete(num);
+}, 3600000).unref?.();
+
+const IMAGE_MIMES = /^image\/(jpeg|jpg|png|gif|webp|bmp|heic|heif)$/i;
+
+// Скачивает вложение и готовит { b64, mime } для vision-вызова.
+// Сжатие до PHOTO_MAX_SIDE экономит входные токены в разы, качество разбора не страдает.
+// Любая ошибка → null: сбой на фото никогда не должен ронять ответ.
+async function prepareImage(msg) {
+  try {
+    const media = await msg.downloadMedia();
+    if (!media || !media.data) return null;
+
+    const mime = (media.mimetype || '').split(';')[0].trim().toLowerCase();
+    if (!IMAGE_MIMES.test(mime)) {
+      console.warn(`⚠️  Формат ${mime || '?'} не поддерживается как изображение — пропускаю`);
+      return null;
+    }
+
+    const buf = Buffer.from(media.data, 'base64');
+    if (buf.length > PHOTO_MAX_BYTES) {
+      console.warn(`⚠️  Фото ${Math.round(buf.length / 1024)} КБ — больше лимита, пропускаю`);
+      return null;
+    }
+
+    if (!sharp) return { b64: media.data, mime };
+
+    try {
+      const small = await sharp(buf)
+        .rotate() // учесть EXIF-поворот
+        .resize({
+          width: PHOTO_MAX_SIDE,
+          height: PHOTO_MAX_SIDE,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: PHOTO_JPEG_QUALITY })
+        .toBuffer();
+      return { b64: small.toString('base64'), mime: 'image/jpeg' };
+    } catch (e) {
+      // Например HEIC без поддержки libheif в сборке sharp — отдаём как есть.
+      console.warn('⚠️  Сжатие не удалось, отправляю оригинал:', e.message);
+      return { b64: media.data, mime };
+    }
+  } catch (e) {
+    console.error('⚠️  Не удалось скачать вложение:', e.message);
+    return null;
+  }
+}
+
+// Двуязычные заглушки для медиа, которые модель не разбирает.
+const MEDIA_NOTICE = {
+  voice:
+    'Голосовые сообщения я пока не слушаю — напишите, пожалуйста, вопрос текстом, и я сразу отвечу.\n\n' +
+    "I can't listen to voice messages yet — please write your question as text and I'll reply right away.",
+  video:
+    'Видео я пока не разбираю. Пришлите, пожалуйста, фото или опишите ситуацию словами.\n\n' +
+    "I can't process video yet. Please send a photo or describe the situation in text.",
+  photo_failed:
+    'Фото не открылось у меня на стороне. Пришлите, пожалуйста, ещё раз (обычным JPG/PNG) ' +
+    'или опишите проблему словами — я помогу.\n\n' +
+    "I couldn't open the photo. Please resend it (as a regular JPG/PNG) or describe the issue in text.",
+  photo_rate:
+    'Фото пришло слишком много подряд — я успел посмотреть не всё. ' +
+    'Пришлите, пожалуйста, самые важные кадры чуть позже или опишите ситуацию словами.\n\n' +
+    'Too many photos at once — I couldn\'t review them all. Please resend the key ones a bit later ' +
+    'or describe the situation in text.',
+  document:
+    `Получил ваш документ и передаю ${OWNER_NAME} — он посмотрит и свяжется с вами.\n\n` +
+    `Got your document, I'm forwarding it to ${OWNER_NAME} — he'll review it and get back to you.`,
+};
+
+// ── История чата → сообщения для модели (user/assistant) ───────────────────
+// Берётся из самого WhatsApp. skipIds — id сообщений-вложений, которые обрабатываются
+// отдельно: их текстовый след добавит ядро (assistant_core), дублировать не нужно.
+async function buildHistory(chat, skipIds = new Set()) {
   const raw = await chat.fetchMessages({ limit: 16 });
+  const traces = photoTraces.get(chat.id._serialized);
   const turns = [];
   for (const m of raw) {
-    const text = (m.body || '').trim();
+    const mid = m.id && m.id._serialized;
+    if (mid && skipIds.has(mid)) continue;
+
+    let text;
+    if (m.type === 'image' && traces && mid && traces.has(mid)) {
+      // Фото из прошлых сообщений: подставляем сохранённое описание, а не «[Фото]».
+      text = traces.get(mid);
+    } else {
+      text = (m.body || '').trim();
+      if (!text && m.hasMedia) text = mediaPlaceholder(m);
+    }
     if (!text) continue;
     const role = m.fromMe ? 'assistant' : 'user';
     if (turns.length && turns[turns.length - 1].role === role) {
@@ -98,6 +273,24 @@ async function buildHistory(chat) {
   }
   while (turns.length && turns[0].role === 'assistant') turns.shift();
   return turns;
+}
+
+function mediaPlaceholder(m) {
+  switch (m.type) {
+    case 'image':
+      return '[Фото]';
+    case 'ptt':
+    case 'audio':
+      return '[Голосовое сообщение]';
+    case 'video':
+      return '[Видео]';
+    case 'document':
+      return '[Документ]';
+    case 'sticker':
+      return '[Стикер]';
+    default:
+      return '[Вложение]';
+  }
 }
 
 // Дебаунс: ждём, пока клиент допишет серию сообщений
@@ -114,33 +307,173 @@ function scheduleReply(chat) {
   );
 }
 
+// Уведомление владельцу о переданном вопросе.
+async function notifyOwner(contactName, number, question, reason) {
+  if (!ESCALATION_NUMBER) return;
+  const notif =
+    `🔔 Вопрос от ${contactName} (${number}), на который ИИ не ответил:\n` +
+    `«${question}»\nПричина: ${reason || '—'}`;
+  try {
+    await client.sendMessage(`${ESCALATION_NUMBER}@c.us`, notif);
+    console.log(`   ↪️ уведомление отправлено ${OWNER_NAME}`);
+  } catch (e) {
+    console.error('   ⚠️ уведомление не ушло:', e.message);
+  }
+}
+
 async function handleChat(chat) {
-  const number = chat.id._serialized.replace(/@.*$/, '');
+  const chatId = chat.id._serialized;
+  const number = chatId.replace(/@.*$/, '');
+  const contactName = chat.name || 'клиент';
+
+  // Вложения этого окна дебаунса забираем в любом случае — иначе они «протухнут»
+  // в буфере и всплывут при следующем сообщении.
+  const media = drainPendingMedia(chatId);
+  const windowText = drainPendingText(chatId); // текст, набранный в этом же окне
 
   // Точная проверка прямо перед ответом — напрямую в Supabase (мгновенно, без задержки кэша).
   // Закрывает и окно дебаунса: номер мог попасть в исключения, пока висел таймер.
   if (await isBlockedFresh(number)) {
-    console.log(`⛔ ${chat.name || number} — в исключениях, не отвечаю`);
+    console.log(`⛔ ${contactName} — в исключениях, не отвечаю`);
     return;
   }
 
-  const history = await buildHistory(chat);
-  if (!history.length || history[history.length - 1].role !== 'user') {
-    return; // последнее слово не за клиентом
+  const photoMsgs = media.filter((m) => m.type === 'image');
+  const otherMedia = media.filter((m) => m.type !== 'image');
+
+  // Подписи к не-фото вложениям тоже считаем текстом клиента.
+  const otherCaptions = otherMedia.map((m) => (m.body || '').trim()).filter(Boolean);
+  const hadText = windowText.length > 0 || otherCaptions.length > 0;
+
+  // Документ всегда передаём человеку — даже если клиент дописал текст рядом.
+  const hasDocument = otherMedia.some((m) => m.type === 'document');
+  let docEscalated = false;
+  if (hasDocument) {
+    const q = otherCaptions.join(' ') || 'Клиент прислал документ';
+    await store.addEscalation(number, contactName, q, 'Документ от клиента — нужен человек');
+    if (AUTO_REPLY) await notifyOwner(contactName, number, q, 'Документ от клиента');
+    docEscalated = true;
   }
 
-  const lastUser = history[history.length - 1].content;
-  const contactName = chat.name || 'клиент';
+  // ── Медиа, которые модель не разбирает: отвечаем детерминированно, без вызовов ИИ.
+  // Если рядом пришёл обычный текст — заглушку НЕ шлём: пусть ИИ ответит на вопрос,
+  // а про вложение он знает из служебной пометки в истории ([Голосовое сообщение] и т.п.).
+  if (!photoMsgs.length && otherMedia.length && !hadText) {
+    const kind = hasDocument
+      ? 'document'
+      : otherMedia.some((m) => m.type === 'video')
+        ? 'video'
+        : otherMedia.some((m) => m.type === 'ptt' || m.type === 'audio')
+          ? 'voice'
+          : null;
+
+    // Стикеры и прочая мелочь — молча игнорируем, если больше ничего не пришло.
+    if (!kind) return;
+
+    const notice = MEDIA_NOTICE[kind];
+    console.log('\n────────────────────────────────────');
+    console.log(`👤 ${contactName}: [${kind}]`);
+    console.log(`🤖 ${AGENT_NAME}: ${notice.split('\n')[0]}`);
+
+    if (AUTO_REPLY) {
+      await chat.sendStateTyping();
+      await chat.sendMessage(notice);
+      console.log('   ✅ отправлено');
+    } else {
+      console.log('   📝 AUTO_REPLY=false — не отправлено (режим теста)');
+    }
+    return;
+  }
+
+  // ── Фото: скачиваем, сжимаем, отдаём ядру.
+  let images = [];
+  const skipIds = new Set();
+  let quotaExceeded = false;
+
+  if (photoMsgs.length) {
+    const allowed = takePhotoQuota(number, Math.min(photoMsgs.length, VISION_MAX_IMAGES));
+    quotaExceeded = allowed < photoMsgs.length;
+    if (quotaExceeded) {
+      console.warn(
+        `⚠️  ${contactName}: прислано ${photoMsgs.length} фото, беру ${allowed} (лимит ${PHOTO_RATE_PER_HOUR}/час)`,
+      );
+    }
+    const take = photoMsgs.slice(0, allowed);
+    // Все сообщения-фото исключаем из истории: их заменит текстовый след из ядра.
+    for (const m of photoMsgs) if (m.id && m.id._serialized) skipIds.add(m.id._serialized);
+
+    const prepared = await Promise.all(take.map(prepareImage));
+    images = prepared.filter(Boolean);
+    // Квоту за нескачавшиеся/битые картинки возвращаем.
+    refundPhotoQuota(number, take.length - images.length);
+
+    // Ни одной картинки не осталось: либо исчерпан лимит, либо все не скачались /
+    // не того формата. Отвечаем короткой заглушкой, ИИ не дёргаем.
+    if (!images.length) {
+      const notice = allowed === 0 ? MEDIA_NOTICE.photo_rate : MEDIA_NOTICE.photo_failed;
+      console.log('\n────────────────────────────────────');
+      console.log(`👤 ${contactName}: [фото · ${photoMsgs.length} шт., ни одно не обработано]`);
+      console.log(`🤖 ${AGENT_NAME}: ${notice.split('\n')[0]}`);
+      if (AUTO_REPLY) {
+        await chat.sendStateTyping();
+        await chat.sendMessage(notice);
+        console.log('   ✅ отправлено');
+      } else {
+        console.log('   📝 AUTO_REPLY=false — не отправлено (режим теста)');
+      }
+      return;
+    }
+  }
+
+  const history = await buildHistory(chat, skipIds);
+
+  // Подпись к фото: в whatsapp-web.js это body самого сообщения с картинкой.
+  // Плюс текст, набранный отдельными сообщениями в этом же окне дебаунса —
+  // клиент часто шлёт фото, а вопрос дописывает следующим сообщением.
+  const caption = [
+    ...photoMsgs.map((m) => (m.body || '').trim()),
+    ...(images.length ? windowText : []),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 1000);
+
+  // Без фото работаем по-старому: отвечаем, только если последнее слово за клиентом.
+  if (!images.length) {
+    if (!history.length || history[history.length - 1].role !== 'user') return;
+  }
+
+  const lastUser = images.length
+    ? caption || '[Фото]'
+    : history[history.length - 1].content;
+
+  const replySuffix = quotaExceeded
+    ? 'P.S. Посмотрел не все фото — их пришло слишком много подряд. ' +
+      'Если что-то важное осталось, пришлите отдельно чуть позже.'
+    : '';
 
   // Через общее ядро: оно сохранит переписку в БД, учтёт режим оператора,
-  // прогонит RAG+Kimi и вернёт ответ. История берётся из самого WhatsApp.
+  // при наличии фото сделает vision-вызов, прогонит RAG+Kimi и вернёт ответ.
   const result = await core.processMessage({
     channel: 'whatsapp',
     external_id: number,
     message: lastUser,
     contact: { name: contactName },
     historyOverride: history,
+    images: images.length ? images : null,
+    photoCaption: images.length ? caption : null,
+    replySuffix,
   });
+
+  // Запоминаем текстовый след, чтобы на следующем сообщении история не потеряла,
+  // что было на фото.
+  if (result.photo && photoMsgs.length) {
+    rememberPhotoTrace(
+      chatId,
+      photoMsgs.map((m) => m.id && m.id._serialized),
+      result.user_text,
+    );
+  }
 
   // Оператор забрал этот чат на себя → ИИ молчит.
   if (result.operator_mode) {
@@ -148,36 +481,41 @@ async function handleChat(chat) {
     return;
   }
 
-  const finalText = result.reply;
+  const finalText = result.reply; // суффикс про лимит фото ядро уже приклеило
   if (!finalText) {
     console.log(`(пустой ответ для «${contactName}», пропускаю)`);
     return;
   }
 
   console.log('\n────────────────────────────────────');
-  console.log(`👤 ${contactName}: ${lastUser}`);
+  console.log(`👤 ${contactName}: ${result.user_text}`);
   console.log(`🤖 ${AGENT_NAME}: ${finalText}`);
   console.log(`   фактов: ${result.facts} · примеров стиля: ${result.examples}`);
+  if (result.photo) {
+    console.log(
+      `   📷 фото: ${images.length} шт. · категория: ${result.photo.category} · ` +
+        `описание: ${(result.photo.description || '').length} симв.`,
+    );
+  }
+  if (result.cost) {
+    console.log(
+      `   💰 in ${result.cost.in} / out ${result.cost.out} / embed ${result.cost.embed} · ` +
+        `$${result.cost.usd.toFixed(5)}`,
+    );
+  }
   if (result.escalate) console.log(`   🔔 эскалация → ${OWNER_NAME}: ${result.reason || '—'}`);
 
-  if (result.escalate) {
-    await store.addEscalation(number, contactName, lastUser, result.reason);
+  // docEscalated: документ уже передан выше — второй раз не дублируем.
+  if (result.escalate && !docEscalated) {
+    await store.addEscalation(number, contactName, result.user_text, result.reason);
   }
 
   if (AUTO_REPLY) {
     await chat.sendStateTyping();
     await chat.sendMessage(finalText);
     console.log('   ✅ отправлено');
-    if (result.escalate && ESCALATION_NUMBER) {
-      const notif =
-        `🔔 Вопрос от ${contactName} (${number}), на который ИИ не ответил:\n` +
-        `«${lastUser}»\nПричина: ${result.reason || '—'}`;
-      try {
-        await client.sendMessage(`${ESCALATION_NUMBER}@c.us`, notif);
-        console.log(`   ↪️ уведомление отправлено ${OWNER_NAME}`);
-      } catch (e) {
-        console.error('   ⚠️ уведомление не ушло:', e.message);
-      }
+    if (result.escalate && !docEscalated) {
+      await notifyOwner(contactName, number, result.user_text, result.reason);
     }
   } else {
     console.log('   📝 AUTO_REPLY=false — не отправлено (режим теста)');
@@ -215,6 +553,7 @@ client.on('authenticated', () => {
 
 client.on('ready', () => {
   console.log(`✅ Бот готов. AUTO_REPLY=${AUTO_REPLY ? 'ON' : 'OFF'} (получено из env: ${JSON.stringify(process.env.AUTO_REPLY)})`);
+  console.log(`📷 Фото: ${sharp ? 'sharp есть' : 'sharp НЕТ (без сжатия)'} · до ${VISION_MAX_IMAGES} шт./сообщение · ${PHOTO_RATE_PER_HOUR}/час на номер`);
   setState({ status: 'ready', qr: null, qrDataUrl: null });
 });
 
@@ -246,6 +585,11 @@ client.on('message', async (msg) => {
       console.log(`⛔ ${chat.name || number} — в исключениях, не отвечаю`);
       return;
     }
+
+    // Вложения складываем в буфер: скачаем их один раз, когда отработает дебаунс.
+    if (msg.hasMedia) pushPendingMedia(chat.id._serialized, msg);
+    else if ((msg.body || '').trim()) pushPendingText(chat.id._serialized, msg.body.trim());
+
     scheduleReply(chat);
   } catch (e) {
     console.error('Ошибка в обработчике message:', e);
@@ -295,7 +639,8 @@ async function sendTelegram(chatId, text) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const app = express();
-app.use(express.json());
+// Лимит поднят: через /assistant/chat может прилетать фото в base64 с сайта.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Общее ядро ИИ-ассистента: /assistant/chat, /assistant/conversations и т.д.
@@ -394,8 +739,20 @@ app.get('/api/wa-status', (req, res) => {
 });
 
 // ── Чат с Alex (старый тестовый эндпоинт без сохранения — оставлен для совместимости) ──
+// Поддерживает images: [{b64, mime}] — тогда сначала делается vision-разбор.
 app.post('/api/chat', async (req, res) => {
   try {
+    const {
+      retrieveContext,
+      buildSystemPrompt,
+      generateReply,
+      parseEscalation,
+      costOf,
+      describeImages,
+      buildPhotoQuery,
+      photoHistoryText,
+    } = require('./agent');
+
     const turns = (Array.isArray(req.body && req.body.messages) ? req.body.messages : [])
       .filter(
         (m) =>
@@ -406,17 +763,37 @@ app.post('/api/chat', async (req, res) => {
       )
       .map((m) => ({ role: m.role, content: m.content.trim() }));
     while (turns.length && turns[0].role === 'assistant') turns.shift();
-    if (!turns.length || turns[turns.length - 1].role !== 'user') {
+
+    const images = (Array.isArray(req.body && req.body.images) ? req.body.images : []).filter(
+      (i) => i && i.b64 && i.mime,
+    );
+
+    if (!images.length && (!turns.length || turns[turns.length - 1].role !== 'user')) {
       return res.status(400).json({ error: 'Нет сообщения пользователя' });
     }
 
-    const { retrieveContext, buildSystemPrompt, generateReply, parseEscalation, costOf } =
-      require('./agent');
+    const caption =
+      turns.length && turns[turns.length - 1].role === 'user' && images.length
+        ? turns[turns.length - 1].content
+        : '';
+
+    let photo = null;
+    if (images.length) {
+      photo = await describeImages(images, caption);
+      const trace = photoHistoryText(photo, caption);
+      if (turns.length && turns[turns.length - 1].role === 'user') {
+        turns[turns.length - 1] = { role: 'user', content: trace };
+      } else {
+        turns.push({ role: 'user', content: trace });
+      }
+    }
+
     const lastUser = turns[turns.length - 1].content;
-    const { examples, facts, embedTokens } = await retrieveContext(lastUser);
+    const query = photo ? buildPhotoQuery(photo, caption) : lastUser;
+    const { examples, facts, embedTokens } = await retrieveContext(query);
     const firstTurn = !turns.some((m) => m.role === 'assistant');
     const { text: raw, usage } = await generateReply(
-      buildSystemPrompt({ examples, facts, firstTurn }),
+      buildSystemPrompt({ examples, facts, firstTurn, photo, photoCaption: caption }),
       turns,
     );
     const { text, escalate, reason } = parseEscalation(raw);
@@ -425,12 +802,23 @@ app.post('/api/chat', async (req, res) => {
 
     if (escalate) await store.addEscalation(null, 'Веб-чат (тест)', lastUser, reason);
 
+    const visionUsage = (photo && photo.usage) || {};
     const cost = costOf({
       promptTokens: usage.prompt_tokens,
       completionTokens: usage.completion_tokens,
       embedTokens,
+      visionPromptTokens: visionUsage.prompt_tokens,
+      visionCompletionTokens: visionUsage.completion_tokens,
     });
-    res.json({ reply, escalated: escalate, reason, facts: facts.length, examples: examples.length, usage: cost });
+    res.json({
+      reply,
+      escalated: escalate,
+      reason,
+      facts: facts.length,
+      examples: examples.length,
+      photo: photo ? { category: photo.category, description: photo.description } : null,
+      usage: cost,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -2,10 +2,12 @@
 // общий для всех каналов (сайт, Telegram, WhatsApp).
 //
 // Логика одна на всех:
-//   1. найти/создать диалог, сохранить сообщение пользователя
-//   2. если включён режим оператора → ИИ молчит (отвечает человек)
-//   3. иначе: RAG (факты + стиль) → генерация (Kimi) → разбор эскалации
-//   4. сохранить ответ ИИ, при эскалации пометить статус
+//   1. найти/создать диалог
+//   2. если пришли изображения — «прочитать» их vision-вызовом и превратить в текст
+//   3. сохранить сообщение пользователя (для фото — текстовый след, НЕ base64)
+//   4. если включён режим оператора → ИИ молчит (отвечает человек)
+//   5. иначе: RAG (факты + стиль) → генерация (Kimi) → разбор эскалации
+//   6. сохранить ответ ИИ, при эскалации пометить статус
 //
 // Никакого HTTP/Telegram/WhatsApp здесь нет — только логика. Отправку
 // ответа в нужный канал делает вызывающая сторона.
@@ -20,14 +22,25 @@ const { OWNER_NAME } = agent;
  * @param {'web'|'telegram'|'whatsapp'} p.channel
  * @param {string|number} p.external_id   уникальный id собеседника в канале
  * @param {string} p.message              текст последнего сообщения пользователя
+ *                                        (для фото — подпись клиента, может быть пустой)
  * @param {object} [p.contact]            {name, email, phone}
  * @param {boolean} [p.is_driver]
  * @param {string}  [p.driver_id]
  * @param {Array}   [p.historyOverride]   готовая история [{role,content}] (для WhatsApp);
- *                                        если не передана — берётся из БД
+ *                                        если не передана — берётся из БД.
+ *                                        ВАЖНО: сообщения-фото в неё включать НЕ нужно —
+ *                                        текстовый след добавится сюда автоматически.
+ * @param {Array}   [p.images]            сырые изображения [{b64, mime}] — ядро само
+ *                                        сделает vision-вызов и превратит их в текст
+ * @param {object}  [p.photo]             уже разобранное фото (если vision-вызов сделал
+ *                                        вызывающий); имеет приоритет над images
+ * @param {string}  [p.photoCaption]      подпись к фото; по умолчанию = message
+ * @param {string}  [p.replySuffix]       текст, который дописывается в конец ответа
+ *                                        ДО сохранения в БД (например «посмотрел не все фото»)
  * @returns {Promise<{conversation_id:number, reply:string|null, escalate:boolean,
  *                    reason:string, operator_mode:boolean, facts:number, examples:number,
- *                    contact_name:string|null, is_driver:boolean}>}
+ *                    contact_name:string|null, is_driver:boolean,
+ *                    photo:object|null, user_text:string, cost:object}>}
  */
 async function processMessage({
   channel,
@@ -37,9 +50,18 @@ async function processMessage({
   is_driver = null,
   driver_id = null,
   historyOverride = null,
+  images = null,
+  photo = null,
+  photoCaption = null,
+  replySuffix = '',
 }) {
   const text = (message || '').trim();
-  if (!text) throw new Error('Пустое сообщение');
+  const imageList = Array.isArray(images) ? images.filter((i) => i && i.b64 && i.mime) : [];
+  const hasPhoto = Boolean(photo) || imageList.length > 0;
+
+  if (!text && !hasPhoto) throw new Error('Пустое сообщение');
+
+  const caption = (photoCaption === null ? text : String(photoCaption || '')).trim();
 
   const conv = await astore.getOrCreateConversation({
     channel,
@@ -51,53 +73,101 @@ async function processMessage({
     driver_id,
   });
 
+  // ── Шаг «глаза»: превращаем картинку в текст ДО всего остального.
+  // Делается и в режиме оператора — чтобы человек в админке видел текстовый
+  // след фото, а не пустое сообщение. Стоит доли цента.
+  let photoData = photo || null;
+  if (!photoData && imageList.length) {
+    photoData = await agent.describeImages(imageList, caption);
+  }
+  const visionUsage = (photoData && photoData.usage) || {};
+
+  // Текст, который уходит в БД и в историю. КРИТИЧНО: никакого base64 —
+  // иначе через пару фото промпт распухнет на мегабайты.
+  const userText = photoData ? agent.photoHistoryText(photoData, caption) : text;
+
   // Сообщение пользователя сохраняем всегда — даже в режиме оператора,
-  // чтобы человек в админке видел, что написал клиент.
-  await astore.saveMessage(conv.id, 'user', text);
+  // чтобы человек в админке видел, что написал (или прислал) клиент.
+  await astore.saveMessage(conv.id, 'user', userText);
+
+  const emptyResult = (extra = {}) => ({
+    conversation_id: conv.id,
+    reply: null,
+    escalate: false,
+    reason: '',
+    operator_mode: false,
+    facts: 0,
+    examples: 0,
+    contact_name: conv.contact_name,
+    is_driver: conv.is_driver,
+    photo: photoData,
+    user_text: userText,
+    cost: agent.costOf({
+      visionPromptTokens: visionUsage.prompt_tokens,
+      visionCompletionTokens: visionUsage.completion_tokens,
+    }),
+    ...extra,
+  });
 
   // Оператор забрал чат на себя → ИИ не отвечает.
-  if (conv.operator_mode) {
-    return {
-      conversation_id: conv.id,
-      reply: null,
-      escalate: false,
-      reason: '',
-      operator_mode: true,
-      facts: 0,
-      examples: 0,
-      contact_name: conv.contact_name,
-      is_driver: conv.is_driver,
-    };
-  }
+  if (conv.operator_mode) return emptyResult({ operator_mode: true });
 
   // История для модели: WhatsApp отдаёт свою (из самого мессенджера),
-  // остальные каналы строятся из БД.
-  const history = historyOverride || (await astore.getHistory(conv.id));
-  if (!history.length || history[history.length - 1].role !== 'user') {
-    // нечего отвечать (последнее слово не за пользователем)
-    return {
-      conversation_id: conv.id,
-      reply: null,
-      escalate: false,
-      reason: '',
-      operator_mode: false,
-      facts: 0,
-      examples: 0,
-      contact_name: conv.contact_name,
-      is_driver: conv.is_driver,
-    };
+  // остальные каналы строятся из БД (там наше сообщение уже сохранено выше).
+  const history = historyOverride ? historyOverride.slice() : await astore.getHistory(conv.id);
+
+  // При historyOverride сообщения-фото в неё не попадают (у них пустой body),
+  // поэтому текстовый след добавляем сами — иначе модель «не увидит» фото.
+  if (photoData && historyOverride) {
+    const last = history[history.length - 1];
+    if (last && last.role === 'user') {
+      history[history.length - 1] = {
+        role: 'user',
+        content: `${last.content}\n${userText}`.trim(),
+      };
+    } else {
+      history.push({ role: 'user', content: userText });
+    }
   }
 
-  const lastUser = history[history.length - 1].content;
-  const { examples, facts } = await agent.retrieveContext(lastUser);
+  if (!history.length || history[history.length - 1].role !== 'user') {
+    // нечего отвечать (последнее слово не за пользователем)
+    return emptyResult();
+  }
+
+  // Поисковый запрос: для фото — подпись + машинное описание, иначе просто текст.
+  // Если разбор фото провалился и подписи нет, запрос был бы пустым: тогда
+  // откатываемся на текст последнего хода, чтобы RAG не искал по пустой строке.
+  const query =
+    (photoData ? agent.buildPhotoQuery(photoData, caption) : '') ||
+    history[history.length - 1].content;
+
+  const { examples, facts, embedTokens } = await agent.retrieveContext(query);
   const firstTurn = !history.some((m) => m.role === 'assistant');
-  const systemPrompt = agent.buildSystemPrompt({ examples, facts, firstTurn });
+  const systemPrompt = agent.buildSystemPrompt({
+    examples,
+    facts,
+    firstTurn,
+    photo: photoData,
+    photoCaption: caption,
+  });
   const { text: rawReply, usage } = await agent.generateReply(systemPrompt, history);
   const { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
 
-  const finalText =
+  const baseText =
     replyText ||
     (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '');
+  // Суффикс приклеиваем ДО сохранения — иначе в админке оператор увидит не тот
+  // текст, который на самом деле получил клиент.
+  const finalText = baseText && replySuffix ? `${baseText}\n\n${replySuffix}` : baseText;
+
+  const cost = agent.costOf({
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    embedTokens,
+    visionPromptTokens: visionUsage.prompt_tokens,
+    visionCompletionTokens: visionUsage.completion_tokens,
+  });
 
   if (finalText) {
     await astore.saveMessage(conv.id, 'assistant', finalText, {
@@ -106,6 +176,9 @@ async function processMessage({
       facts: facts.length,
       examples: examples.length,
       usage: usage || null,
+      vision_usage: photoData ? visionUsage : null,
+      photo_category: photoData ? photoData.category : null,
+      cost,
     });
   }
 
@@ -123,6 +196,9 @@ async function processMessage({
     examples: examples.length,
     contact_name: conv.contact_name,
     is_driver: conv.is_driver,
+    photo: photoData,
+    user_text: userText,
+    cost,
   };
 }
 
