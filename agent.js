@@ -20,9 +20,10 @@ const KIMI_MODEL = process.env.KIMI_MODEL || 'kimi-k2.6';
 const KIMI_BASE_URL = process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1';
 // kimi-k2.6 — «думающая» модель: reasoning тоже тратит выходные токены,
 // поэтому лимит с запасом (это потолок, а не цель — короткие ответы не дорожают).
-// Зашито в код (env игнорим): kimi-k2.6 тратит токены на reasoning,
-// при 4096 сложные ответы обрывались в пустоту — даём запас.
-const KIMI_MAX_TOKENS = 8192;
+// kimi-k2.6 тратит токены на reasoning, при 4096 сложные ответы обрывались
+// в пустоту — даём запас. Имя переменной новое (старые значения на хостинге
+// его не перебьют), поднимать при появлении «пустых ответов» в логе.
+const KIMI_MAX_TOKENS = intEnv('KIMI_MAX_TOKENS', 8192, 2048, 32768);
 
 const EMBED_MODEL = process.env.EMBED_MODEL || 'text-embedding-3-small';
 // Модель для перевода иноязычных запросов на русский ПЕРЕД поиском по базе
@@ -547,6 +548,7 @@ function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCapt
 // ── Генерация ответа (Kimi) ──────────────────────────────────────────
 async function generateReply(systemPrompt, history) {
   const messages = [{ role: 'system', content: systemPrompt }, ...history];
+  const started = Date.now();
   const res = await kimi.chat.completions.create(
     {
       model: KIMI_MODEL,
@@ -555,7 +557,25 @@ async function generateReply(systemPrompt, history) {
     },
     { timeout: KIMI_TIMEOUT_MS },
   );
-  return { text: (res.choices[0]?.message?.content || '').trim(), usage: res.usage || {} };
+
+  const text = (res.choices[0]?.message?.content || '').trim();
+  const finish = res.choices[0]?.finish_reason;
+  const u = res.usage || {};
+  console.log(
+    `💬 reply: ${((Date.now() - started) / 1000).toFixed(1)}с · in ${u.prompt_tokens || 0} / ` +
+      `out ${u.completion_tokens || 0} · finish=${finish} · ${text.length} симв.`,
+  );
+
+  // Пустой ответ при finish_reason='length' — kimi-k2.6 израсходовала весь лимит
+  // на reasoning и до текста не дошла. Клиент в этом случае получал ТИШИНУ.
+  if (!text) {
+    console.error(
+      `❌ Модель вернула пустой ответ (finish=${finish}, out=${u.completion_tokens || 0}` +
+        `/${KIMI_MAX_TOKENS}). ${finish === 'length' ? 'Подними KIMI_MAX_TOKENS.' : ''}`,
+    );
+  }
+
+  return { text, usage: u, finishReason: finish };
 }
 
 // Стоимость одного ответа в токенах и долларах.

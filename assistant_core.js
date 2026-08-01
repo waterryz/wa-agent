@@ -192,8 +192,20 @@ async function processMessage({
     photo: photoData,
     photoCaption: caption,
   });
-  const { text: rawReply, usage } = await agent.generateReply(systemPrompt, history);
-  const { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
+  const { text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history);
+  let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
+
+  // Модель может вернуть пустоту: у kimi-k2.6 reasoning тратит те же выходные
+  // токены, и на сложном вопросе лимит кончается ДО текста ответа. Раньше клиент
+  // в этом случае не получал вообще ничего. Теперь — честная передача человеку.
+  if (!replyText && !escalate) {
+    console.error('❌ Пустой ответ модели — передаю человеку вместо тишины');
+    escalate = true;
+    reason =
+      finishReason === 'length'
+        ? 'Модель не уложилась в лимит токенов (пустой ответ)'
+        : `Модель вернула пустой ответ (finish=${finishReason})`;
+  }
 
   const baseText =
     replyText ||
