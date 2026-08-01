@@ -38,11 +38,13 @@ const VISION_MODEL = process.env.VISION_MODEL || KIMI_MODEL;
 const VISION_MAX_TOKENS = intEnv('VISION_MAX_TOKENS', 4096, 512, 16384);
 // Защита от абьюза: сколько картинок максимум уходит в один vision-вызов.
 const VISION_MAX_IMAGES = intEnv('VISION_MAX_IMAGES', 4, 1, 16);
-// Таймауты на вызовы модели: без них vision-запрос с 4 картинками может висеть
-// минутами и держать весь ответ клиенту.
-const KIMI_TIMEOUT_MS = intEnv('KIMI_TIMEOUT_MS', 90000, 5000);
-const VISION_TIMEOUT_MS = intEnv('VISION_TIMEOUT_MS', 120000, 5000);
-const TRANSLATE_TIMEOUT_MS = intEnv('TRANSLATE_TIMEOUT_MS', 30000, 5000);
+// Таймауты на вызовы модели. ВАЖНО: они должны укладываться в таймаут вызывающей
+// стороны (ASSISTANT_TIMEOUT=120с в bot.py). На фото шагов два — vision + основной
+// вызов, поэтому 45+60=105с < 120с. Иначе бот отвалится по своему таймауту, а мы
+// всё равно заплатим за оба вызова, и клиент пришлёт фото повторно.
+const KIMI_TIMEOUT_MS = intEnv('KIMI_TIMEOUT_MS', 60000, 5000);
+const VISION_TIMEOUT_MS = intEnv('VISION_TIMEOUT_MS', 45000, 5000);
+const TRANSLATE_TIMEOUT_MS = intEnv('TRANSLATE_TIMEOUT_MS', 20000, 5000);
 
 const STYLE_TOP_K = intEnv('RAG_TOP_K', 6);
 const STYLE_MIN_SIM = parseFloat(process.env.RAG_MIN_SIMILARITY || '0.3');
@@ -236,7 +238,7 @@ async function describeImages(images, caption = '') {
 
   const sys = [
     'Ты — «глаза» ИИ-ассистента компании Prime Fusion (аренда TLC-автомобилей в Нью-Йорке для Uber/Lyft).',
-    'Клиент прислал фото в WhatsApp. Опиши ТОЛЬКО то, что реально видно, конкретно и по делу, на русском языке.',
+    'Клиент прислал фото в мессенджере. Опиши ТОЛЬКО то, что реально видно, конкретно и по делу, на русском языке.',
     'Не придумывай деталей, которых не видно. Не давай советов и не отвечай клиенту — твоя задача только описать.',
     '',
     'Верни СТРОГО JSON без markdown-обёртки:',
@@ -313,6 +315,105 @@ async function describeImages(images, caption = '') {
     };
   } catch (e) {
     console.error('⚠️  Разбор фото не удался:', e.message);
+    return fallback;
+  }
+}
+
+// ── Разбор фото сервисного отчёта ────────────────────────────────────
+// Водитель после ТО/ремонта присылает в Telegram фото ресита, одометра и
+// чек-листа. Здесь мы вытаскиваем из них структурированные данные, чтобы Антону
+// в админ-канал приходил не просто набор картинок, а готовая сводка.
+// Как и describeImages — НИКОГДА не бросает исключение.
+async function describeServicePhotos(images) {
+  const fallback = {
+    odometer: '',
+    receipt_date: '',
+    receipt_total: '',
+    vendor: '',
+    works: [],
+    oil: '',
+    plate: '',
+    description: '',
+    warnings: [],
+    usage: {},
+  };
+
+  const list = (Array.isArray(images) ? images : [])
+    .filter((img) => img && img.b64 && img.mime)
+    .slice(0, VISION_MAX_IMAGES);
+  if (!list.length) return fallback;
+
+  const sys = [
+    'Ты разбираешь фото сервисного отчёта водителя компании Prime Fusion',
+    '(аренда TLC-автомобилей Toyota Sienna в Нью-Йорке).',
+    'На фото обычно: чек (receipt) из автосервиса, панель приборов с пробегом, заполненный чек-лист DMV.',
+    'Извлеки данные ТОЛЬКО из того, что реально видно. Ничего не додумывай и не подставляй по смыслу.',
+    'Если поля не видно или не разобрать — оставь пустую строку.',
+    '',
+    'Верни СТРОГО JSON без markdown-обёртки:',
+    '{',
+    '  "odometer": пробег с панели приборов, ТОЛЬКО цифры без единиц ("" если не видно),',
+    '  "receipt_date": дата с чека как на чеке ("" если нет),',
+    '  "receipt_total": итоговая сумма с чека с валютой, например "$89.99" ("" если нет),',
+    '  "vendor": название автосервиса с чека ("" если нет),',
+    '  "works": массив выполненных работ на русском, например ["замена масла","ротация колёс"] (пустой массив если не видно),',
+    '  "oil": марка и вязкость масла, например "Mobil 1 0W20" ("" если не указано),',
+    '  "plate": номер автомобиля, если виден ("" если нет),',
+    '  "description": 1-2 предложения — что именно на фото,',
+    '  "warnings": массив проблем с самими фото на русском. Добавляй пункт, если:',
+    '              на чеке НЕ указана марка/вязкость масла; чек нечитаемый; пробег не видно;',
+    '              чек-лист заполнен не полностью; фото размытое. Пустой массив, если всё в порядке.',
+    '}',
+  ].join('\n');
+
+  const content = list.map((img) => ({
+    type: 'image_url',
+    image_url: { url: `data:${img.mime};base64,${img.b64}` },
+  }));
+  content.push({ type: 'text', text: 'Разбери эти фото сервисного отчёта.' });
+
+  try {
+    // ВАЖНО: kimi-k2.6 принимает только temperature=1 — параметр не передаём.
+    const res = await kimi.chat.completions.create(
+      {
+        model: VISION_MODEL,
+        max_tokens: VISION_MAX_TOKENS,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content },
+        ],
+      },
+      { timeout: VISION_TIMEOUT_MS },
+    );
+
+    if (res.choices[0]?.finish_reason === 'length') {
+      console.warn(
+        `⚠️  Vision-ответ обрезан по лимиту (VISION_MAX_TOKENS=${VISION_MAX_TOKENS}) — подними лимит.`,
+      );
+    }
+
+    const raw = (res.choices[0]?.message?.content || '').trim();
+    const m = raw.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(m ? m[0] : raw);
+
+    const str = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
+    const arr = (v) =>
+      Array.isArray(v) ? v.map(str).filter(Boolean) : str(v) ? [str(v)] : [];
+
+    return {
+      odometer: str(parsed.odometer).replace(/[^\d]/g, ''),
+      receipt_date: str(parsed.receipt_date),
+      receipt_total: str(parsed.receipt_total),
+      vendor: str(parsed.vendor),
+      works: arr(parsed.works),
+      oil: str(parsed.oil),
+      plate: str(parsed.plate),
+      description: str(parsed.description),
+      warnings: arr(parsed.warnings),
+      usage: res.usage || {},
+    };
+  } catch (e) {
+    console.error('⚠️  Разбор сервисных фото не удался:', e.message);
     return fallback;
   }
 }
@@ -486,6 +587,7 @@ module.exports = {
   embed,
   retrieveContext,
   describeImages,
+  describeServicePhotos,
   buildPhotoQuery,
   buildPhotoBlock,
   photoHistoryText,

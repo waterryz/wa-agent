@@ -17,6 +17,33 @@ const astore = require('./assistant_store');
 
 const { OWNER_NAME } = agent;
 
+// ── Квота на разбор фото ─────────────────────────────────────────────
+// WhatsApp-поток считает лимит у себя (там есть доступ к номеру до вызова ядра),
+// а Telegram и сайт ходят прямо сюда — без этой защиты один человек с альбомом
+// на 30 кадров заметно ударит по счёту. Счётчик в памяти процесса: при рестарте
+// обнуляется, но для защиты от спама этого достаточно.
+const PHOTO_RATE_PER_HOUR = parseInt(process.env.PHOTO_RATE_PER_HOUR || '20', 10) || 20;
+const photoRate = new Map(); // `${channel}:${external_id}` -> { count, resetAt }
+
+function takePhotoQuota(key, want) {
+  const now = Date.now();
+  const rec = photoRate.get(key);
+  if (!rec || now >= rec.resetAt) {
+    const take = Math.min(want, PHOTO_RATE_PER_HOUR);
+    photoRate.set(key, { count: take, resetAt: now + 3600000 });
+    return take;
+  }
+  const take = Math.min(want, Math.max(0, PHOTO_RATE_PER_HOUR - rec.count));
+  rec.count += take;
+  return take;
+}
+
+// Чистим протухшие счётчики, чтобы Map не рос бесконечно.
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, rec] of photoRate) if (now >= rec.resetAt) photoRate.delete(k);
+}, 3600000).unref?.();
+
 /**
  * @param {object} p
  * @param {'web'|'telegram'|'whatsapp'} p.channel
@@ -73,18 +100,30 @@ async function processMessage({
     driver_id,
   });
 
-  // ── Шаг «глаза»: превращаем картинку в текст ДО всего остального.
-  // Делается и в режиме оператора — чтобы человек в админке видел текстовый
-  // след фото, а не пустое сообщение. Стоит доли цента.
+  // ── Шаг «глаза»: превращаем картинку в текст.
+  // В режиме оператора vision НЕ вызываем: отвечает человек, он и так видит фото
+  // в мессенджере, а платить за разбор каждого кадра при спаме незачем.
   let photoData = photo || null;
-  if (!photoData && imageList.length) {
-    photoData = await agent.describeImages(imageList, caption);
+  let quotaDropped = 0;
+
+  if (!photoData && imageList.length && !conv.operator_mode) {
+    const allowed = takePhotoQuota(`${channel}:${external_id}`, imageList.length);
+    quotaDropped = imageList.length - allowed;
+    if (allowed > 0) {
+      photoData = await agent.describeImages(imageList.slice(0, allowed), caption);
+    } else {
+      console.warn(`⚠️  Лимит фото исчерпан для ${channel}:${external_id} (${PHOTO_RATE_PER_HOUR}/час)`);
+    }
   }
   const visionUsage = (photoData && photoData.usage) || {};
 
   // Текст, который уходит в БД и в историю. КРИТИЧНО: никакого base64 —
   // иначе через пару фото промпт распухнет на мегабайты.
-  const userText = photoData ? agent.photoHistoryText(photoData, caption) : text;
+  const userText = photoData
+    ? agent.photoHistoryText(photoData, caption)
+    : imageList.length
+      ? `[Фото${imageList.length > 1 ? ` · ${imageList.length} шт.` : ''}]${caption ? ` ${caption}` : ''}`
+      : text;
 
   // Сообщение пользователя сохраняем всегда — даже в режиме оператора,
   // чтобы человек в админке видел, что написал (или прислал) клиент.
@@ -118,7 +157,9 @@ async function processMessage({
 
   // При historyOverride сообщения-фото в неё не попадают (у них пустой body),
   // поэтому текстовый след добавляем сами — иначе модель «не увидит» фото.
-  if (photoData && historyOverride) {
+  // Условие по hasPhoto, а не по photoData: при исчерпанной квоте описания нет,
+  // но пометка «[Фото]» в истории всё равно нужна.
+  if (hasPhoto && historyOverride) {
     const last = history[history.length - 1];
     if (last && last.role === 'user') {
       history[history.length - 1] = {
@@ -157,9 +198,21 @@ async function processMessage({
   const baseText =
     replyText ||
     (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '');
+
+  // Про отброшенные по лимиту фото клиенту надо сказать честно — иначе он решит,
+  // что ассистент посмотрел всё, и не пришлёт важный кадр повторно.
+  const dropNote = !quotaDropped
+    ? ''
+    : photoData
+      ? 'P.S. Посмотрел не все фото — их пришло слишком много подряд. ' +
+        'Если что-то важное осталось, пришлите отдельно чуть позже.'
+      : 'P.S. Фото пока посмотреть не смог — их пришло слишком много подряд. ' +
+        'Попробуйте прислать через час или опишите словами.';
+
   // Суффикс приклеиваем ДО сохранения — иначе в админке оператор увидит не тот
   // текст, который на самом деле получил клиент.
-  const finalText = baseText && replySuffix ? `${baseText}\n\n${replySuffix}` : baseText;
+  const suffix = [replySuffix, dropNote].filter(Boolean).join('\n\n');
+  const finalText = baseText && suffix ? `${baseText}\n\n${suffix}` : baseText;
 
   const cost = agent.costOf({
     promptTokens: usage.prompt_tokens,

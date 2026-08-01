@@ -2,7 +2,8 @@
 // Монтируется в server.js:  app.use('/assistant', createAssistantRouter({...}))
 //
 // Публичные эндпоинты (зовут сайт и бот):
-//   POST /assistant/chat               — отправить сообщение, получить ответ ИИ
+//   POST /assistant/chat               — отправить сообщение (текст и/или фото), получить ответ ИИ
+//   POST /assistant/vision             — только разбор фото, без RAG и без ответа клиенту
 //   GET  /assistant/conversations/:id/poll?after=<id>  — новые ответы (для веб-чата)
 //
 // Админские эндпоинты (нужен заголовок x-admin-key, если задан ADMIN_API_KEY):
@@ -16,8 +17,48 @@
 const express = require('express');
 const core = require('./assistant_core');
 const astore = require('./assistant_store');
+const agent = require('./agent');
 const store = require('./store'); // старый слой: seen / blocked / escalations (для админки)
 const adminAssistant = require('./admin_assistant'); // ИИ-редактор базы знаний (админский чат)
+
+// Лимит на одну картинку в base64. Важно, чтобы VISION_MAX_IMAGES × этот лимит
+// укладывался в лимит тела запроса (JSON_BODY_LIMIT в server.js, по умолчанию
+// 25 МБ), иначе express вернёт 413 HTML — а клиент ждёт JSON и не разберёт ответ.
+// 4 × 5 МБ = 20 МБ < 25 МБ. Клиенты (bot.py, сайт) жмут до ~1280px и шлют ~150 КБ.
+const MAX_IMAGE_B64_BYTES = parseInt(process.env.MAX_IMAGE_B64_BYTES || String(5 * 1024 * 1024), 10);
+const ALLOWED_IMAGE_MIMES = /^image\/(jpeg|jpg|png|gif|webp|bmp|heic|heif)$/i;
+
+/**
+ * Проверяет и нормализует массив картинок из тела запроса.
+ * Возвращает { images, dropped, error }. Неверный формат — явная ошибка клиенту,
+ * а не тихое «фото не вижу»; лишние сверх лимита считаются в dropped.
+ */
+function parseImages(raw) {
+  if (raw == null) return { images: [], dropped: 0, error: null };
+  if (!Array.isArray(raw)) return { images: [], dropped: 0, error: 'images должен быть массивом' };
+
+  const images = [];
+  const dropped = Math.max(0, raw.length - agent.VISION_MAX_IMAGES);
+  for (const item of raw.slice(0, agent.VISION_MAX_IMAGES)) {
+    if (!item || typeof item !== 'object') continue;
+    // Сайт может прислать b64 вместе с префиксом data:image/jpeg;base64,...
+    // Если его не снять, в запрос к модели уедет двойной префикс и мусор.
+    const b64 = (typeof item.b64 === 'string' ? item.b64 : '').replace(/^data:[^,]*,/, '');
+    const mime = String(item.mime || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    if (!b64 || !mime) return { images: [], dropped: 0, error: 'у каждой картинки нужны b64 и mime' };
+    if (!ALLOWED_IMAGE_MIMES.test(mime)) {
+      return { images: [], dropped: 0, error: `формат ${mime} не поддерживается` };
+    }
+    if (b64.length > MAX_IMAGE_B64_BYTES) {
+      return { images: [], dropped: 0, error: 'картинка слишком большая — сожмите перед отправкой' };
+    }
+    images.push({ b64, mime });
+  }
+  return { images, dropped, error: null };
+}
 
 /**
  * @param {object} deps
@@ -30,7 +71,12 @@ const adminAssistant = require('./admin_assistant'); // ИИ-редактор б
 function createAssistantRouter(deps = {}) {
   const { sendTelegram, sendWhatsApp, onEscalation, onBlockedChange, adminKey } = deps;
   const router = express.Router();
-  router.use(express.json());
+  // Тело уже разобрано глобальным express.json() в server.js (лимит JSON_BODY_LIMIT,
+  // по умолчанию 25mb — под фото в base64). Второй парсер здесь не нужен: body-parser
+  // видит req._body и всё равно пропустил бы запрос, создавая ложное впечатление,
+  // что у роутера свой лимит. Строка ниже — на случай монтирования роутера в другое
+  // приложение без глобального парсера.
+  router.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 
   // ── защита админских маршрутов ──
   function requireAdmin(req, res, next) {
@@ -43,6 +89,7 @@ function createAssistantRouter(deps = {}) {
   // ───────────────────────── ПУБЛИЧНЫЕ ─────────────────────────
 
   // Главная точка: сайт и бот шлют сюда сообщение пользователя.
+  // Поддерживает фото: images: [{b64, mime}] + необязательный photo_caption.
   router.post('/chat', async (req, res) => {
     try {
       const b = req.body || {};
@@ -52,9 +99,18 @@ function createAssistantRouter(deps = {}) {
       if (!['web', 'telegram', 'whatsapp'].includes(channel)) {
         return res.status(400).json({ error: 'Некорректный channel' });
       }
-      if (!external_id || !message || !String(message).trim()) {
-        return res.status(400).json({ error: 'Нужны external_id и message' });
+
+      const { images, dropped, error: imgError } = parseImages(b.images);
+      if (imgError) return res.status(400).json({ error: imgError });
+
+      if (!external_id) return res.status(400).json({ error: 'Нужен external_id' });
+      // Фото без подписи — валидный случай: текст не обязателен, если есть картинка.
+      if (!images.length && (!message || !String(message).trim())) {
+        return res.status(400).json({ error: 'Нужен message или images' });
       }
+
+      const photoCaption =
+        b.photo_caption !== undefined ? b.photo_caption : b.photoCaption;
 
       const result = await core.processMessage({
         channel,
@@ -63,15 +119,25 @@ function createAssistantRouter(deps = {}) {
         contact: { name: b.name || null, email: b.email || null, phone: b.phone || null },
         is_driver: typeof b.is_driver === 'boolean' ? b.is_driver : null,
         driver_id: b.driver_id || null,
+        images: images.length ? images : null,
+        photoCaption: images.length ? photoCaption ?? null : null,
+        // Клиент прислал больше картинок, чем мы разбираем за раз — говорим об этом
+        // прямо в ответе, иначе он решит, что ассистент посмотрел все.
+        replySuffix: dropped
+          ? `P.S. Посмотрел первые ${images.length} фото из ${images.length + dropped} — ` +
+            `остальные пришлите отдельным сообщением, если они важны.`
+          : String(b.reply_suffix || ''),
       });
 
       // Эскалацию дублируем в старую панель «Переданные вопросы», если задан хук.
+      // В question отдаём user_text: для фото это текстовый след с описанием,
+      // иначе в панели была бы пустая строка или голое «[Фото]».
       if (result.escalate && typeof onEscalation === 'function') {
         onEscalation({
           channel,
           external_id,
           name: result.contact_name || b.name || null,
-          question: message,
+          question: result.user_text || message,
           reason: result.reason,
         }).catch(() => {});
       }
@@ -82,7 +148,42 @@ function createAssistantRouter(deps = {}) {
         operator_mode: result.operator_mode,
         escalated: result.escalate,
         is_driver: result.is_driver,
+        // Для логов и отладки на стороне бота. base64 сюда не возвращается.
+        photo: result.photo
+          ? { category: result.photo.category, description: result.photo.description }
+          : null,
       });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Только «глаза»: разбирает фото и возвращает структуру. Ни RAG, ни ответа
+  // клиенту, ни записи в БД. Используется сервисным меню Telegram-бота, где нужно
+  // вытащить пробег/чек/работы, а не поговорить с клиентом.
+  //   body: { images: [{b64, mime}], mode: 'service' | 'client', caption?: string }
+  // ПОД АДМИН-КЛЮЧОМ: эндпоинт напрямую жжёт vision-токены и не привязан к диалогу,
+  // поэтому открытым его держать нельзя. bot.py шлёт заголовок x-admin-key.
+  router.post('/vision', requireAdmin, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const { images, error: imgError } = parseImages(b.images);
+      if (imgError) return res.status(400).json({ error: imgError });
+      if (!images.length) return res.status(400).json({ error: 'Нужны images' });
+
+      const mode = b.mode === 'client' ? 'client' : 'service';
+      const out =
+        mode === 'client'
+          ? await agent.describeImages(images, String(b.caption || ''))
+          : await agent.describeServicePhotos(images);
+
+      const usage = out.usage || {};
+      const cost = agent.costOf({
+        visionPromptTokens: usage.prompt_tokens,
+        visionCompletionTokens: usage.completion_tokens,
+      });
+      const { usage: _drop, ...data } = out;
+      res.json({ mode, ...data, cost });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
