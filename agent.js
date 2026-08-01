@@ -33,17 +33,23 @@ const TRANSLATE_MODEL = process.env.TRANSLATE_MODEL || KIMI_MODEL;
 // Vision: kimi-k2.6 умеет изображения, отдельная модель не нужна.
 // Можно переопределить, если захочется гонять фото на другой модели.
 const VISION_MODEL = process.env.VISION_MODEL || KIMI_MODEL;
-// Само описание короткое, НО kimi-k2.6 тратит выходные токены ещё и на reasoning.
-// При 1024 JSON обрывался на середине и каждое фото становилось 'unclear' — даём запас.
+// Само описание короткое, НО kimi-k2.6 по умолчанию тратит выходные токены ещё и
+// на reasoning. При 1024 JSON обрывался на середине и каждое фото становилось
+// 'unclear' — даём запас (лимит, а не цель: неиспользованные токены не оплачиваются).
 const VISION_MAX_TOKENS = intEnv('VISION_MAX_TOKENS', 4096, 512, 16384);
+// Описать картинку — задача без рассуждений: reasoning здесь только жжёт время
+// (вплоть до таймаута) и выходные токены. kimi-k2.6 умеет его отключать.
+// VISION_THINKING=enabled вернёт старое поведение, если понадобится.
+const VISION_THINKING = (process.env.VISION_THINKING || 'disabled').trim().toLowerCase();
 // Защита от абьюза: сколько картинок максимум уходит в один vision-вызов.
 const VISION_MAX_IMAGES = intEnv('VISION_MAX_IMAGES', 4, 1, 16);
 // Таймауты на вызовы модели. ВАЖНО: они должны укладываться в таймаут вызывающей
-// стороны (ASSISTANT_TIMEOUT=120с в bot.py). На фото шагов два — vision + основной
-// вызов, поэтому 45+60=105с < 120с. Иначе бот отвалится по своему таймауту, а мы
-// всё равно заплатим за оба вызова, и клиент пришлёт фото повторно.
-const KIMI_TIMEOUT_MS = intEnv('KIMI_TIMEOUT_MS', 60000, 5000);
-const VISION_TIMEOUT_MS = intEnv('VISION_TIMEOUT_MS', 45000, 5000);
+// стороны (ASSISTANT_TIMEOUT в bot.py, по умолчанию 150с). На фото шагов два —
+// vision + основной вызов, поэтому 60+75=135с < 150с. Иначе бот отвалится по
+// своему таймауту, а мы всё равно заплатим за оба вызова.
+// С отключённым reasoning vision обычно укладывается в 10–20с; 60с — страховка.
+const KIMI_TIMEOUT_MS = intEnv('KIMI_TIMEOUT_MS', 75000, 5000);
+const VISION_TIMEOUT_MS = intEnv('VISION_TIMEOUT_MS', 60000, 5000);
 const TRANSLATE_TIMEOUT_MS = intEnv('TRANSLATE_TIMEOUT_MS', 20000, 5000);
 
 const STYLE_TOP_K = intEnv('RAG_TOP_K', 6);
@@ -216,6 +222,63 @@ async function retrieveContext(text) {
   return { examples, facts, embedTokens };
 }
 
+// ── Общий vision-вызов ───────────────────────────────────────────────
+// Один путь для клиентских и сервисных фото: отключённый reasoning, таймаут,
+// замер времени и устойчивый разбор JSON.
+// Бросает исключение — вызывающий сам решает, чем подменить результат.
+async function visionCall(sys, content, label) {
+  const started = Date.now();
+
+  const body = {
+    model: VISION_MODEL,
+    max_tokens: VISION_MAX_TOKENS,
+    messages: [
+      { role: 'system', content: sys },
+      { role: 'user', content },
+    ],
+  };
+  // ВАЖНО: kimi-k2.6 принимает только temperature=1 — параметр не передаём.
+  if (VISION_THINKING === 'disabled') body.thinking = { type: 'disabled' };
+
+  let res;
+  try {
+    res = await kimi.chat.completions.create(body, { timeout: VISION_TIMEOUT_MS });
+  } catch (e) {
+    // Если модель/шлюз не знает параметра thinking — повторяем без него,
+    // чтобы правка не сломала разбор на другой версии API.
+    const msg = String(e && e.message);
+    if (body.thinking && /thinking/i.test(msg)) {
+      console.warn('⚠️  Параметр thinking не принят, повторяю без него:', msg);
+      delete body.thinking;
+      res = await kimi.chat.completions.create(body, { timeout: VISION_TIMEOUT_MS });
+    } else {
+      throw e;
+    }
+  }
+
+  const secs = ((Date.now() - started) / 1000).toFixed(1);
+  const u = res.usage || {};
+  console.log(
+    `📷 vision(${label}): ${secs}с · in ${u.prompt_tokens || 0} / out ${u.completion_tokens || 0}` +
+      `${body.thinking ? ' · reasoning off' : ''}`,
+  );
+  if (res.choices[0]?.finish_reason === 'length') {
+    console.warn(
+      `⚠️  Vision-ответ обрезан по лимиту (VISION_MAX_TOKENS=${VISION_MAX_TOKENS}) — подними лимит.`,
+    );
+  }
+
+  const raw = (res.choices[0]?.message?.content || '').trim();
+  // Модель нередко дописывает «Вот результат:» и оборачивает в ```json.
+  // Забираем самый внешний JSON-объект, а не полагаемся на позицию фенсов.
+  const m = raw.match(/\{[\s\S]*\}/);
+  return { parsed: JSON.parse(m ? m[0] : raw), usage: res.usage || {} };
+}
+
+// Нормализация полей: модель может вернуть null/число/массив вместо строки.
+const vstr = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
+const varr = (v) => (Array.isArray(v) ? v.map(vstr).filter(Boolean) : vstr(v) ? [vstr(v)] : []);
+
 // ── Разбор фото («глаза» ассистента) ─────────────────────────────────
 // Возвращает структурированное описание НА РУССКОМ (факты в базе на русском —
 // описание сразу пригодно как поисковый запрос для RAG).
@@ -263,35 +326,9 @@ async function describeImages(images, caption = '') {
   });
 
   try {
-    // ВАЖНО: kimi-k2.6 принимает только temperature=1 — параметр не передаём.
-    const res = await kimi.chat.completions.create(
-      {
-        model: VISION_MODEL,
-        max_tokens: VISION_MAX_TOKENS,
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content },
-        ],
-      },
-      { timeout: VISION_TIMEOUT_MS },
-    );
+    const { parsed, usage } = await visionCall(sys, content, 'client');
 
-    const finish = res.choices[0]?.finish_reason;
-    if (finish === 'length') {
-      console.warn(
-        `⚠️  Vision-ответ обрезан по лимиту (VISION_MAX_TOKENS=${VISION_MAX_TOKENS}) — подними лимит.`,
-      );
-    }
-
-    const raw = (res.choices[0]?.message?.content || '').trim();
-    // Модель нередко дописывает «Вот результат:» и оборачивает в ```json.
-    // Забираем самый внешний JSON-объект, а не полагаемся на позицию фенсов.
-    const m = raw.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(m ? m[0] : raw);
-
-    // Нормализация: модель может вернуть null/число/массив вместо строки —
-    // без этого в промпт уедет «Категория: null».
-    const str = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
+    const str = vstr;
     const CATEGORIES = [
       'damage',
       'document',
@@ -311,7 +348,7 @@ async function describeImages(images, caption = '') {
       description,
       text_on_image: str(parsed.text_on_image),
       question: str(parsed.question),
-      usage: res.usage || {},
+      usage,
     };
   } catch (e) {
     console.error('⚠️  Разбор фото не удался:', e.message);
@@ -373,32 +410,9 @@ async function describeServicePhotos(images) {
   content.push({ type: 'text', text: 'Разбери эти фото сервисного отчёта.' });
 
   try {
-    // ВАЖНО: kimi-k2.6 принимает только temperature=1 — параметр не передаём.
-    const res = await kimi.chat.completions.create(
-      {
-        model: VISION_MODEL,
-        max_tokens: VISION_MAX_TOKENS,
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content },
-        ],
-      },
-      { timeout: VISION_TIMEOUT_MS },
-    );
-
-    if (res.choices[0]?.finish_reason === 'length') {
-      console.warn(
-        `⚠️  Vision-ответ обрезан по лимиту (VISION_MAX_TOKENS=${VISION_MAX_TOKENS}) — подними лимит.`,
-      );
-    }
-
-    const raw = (res.choices[0]?.message?.content || '').trim();
-    const m = raw.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(m ? m[0] : raw);
-
-    const str = (v) => (typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim());
-    const arr = (v) =>
-      Array.isArray(v) ? v.map(str).filter(Boolean) : str(v) ? [str(v)] : [];
+    const { parsed, usage } = await visionCall(sys, content, 'service');
+    const str = vstr;
+    const arr = varr;
 
     return {
       odometer: str(parsed.odometer).replace(/[^\d]/g, ''),
@@ -410,7 +424,7 @@ async function describeServicePhotos(images) {
       plate: str(parsed.plate),
       description: str(parsed.description),
       warnings: arr(parsed.warnings),
-      usage: res.usage || {},
+      usage,
     };
   } catch (e) {
     console.error('⚠️  Разбор сервисных фото не удался:', e.message);
