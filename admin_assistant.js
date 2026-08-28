@@ -250,4 +250,6 @@ async function adminChat(userMessage, history = []) {
   }
 }
 
-module.exports = { adminChat };
+// Примитивы БЗ переиспользуются модерацией стейджинга (kb_collector.js):
+// approve предложения = тот же add/update с пересчётом эмбеддинга.
+module.exports = { adminChat, embed, toolAdd, toolUpdate, toolSearch, toolDelete };

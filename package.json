@@ -10,7 +10,8 @@
     "web": "node web.js",
     "bot": "node bot.js",
     "ingest": "node ingest_docs.js",
-    "upload": "node parse_and_upload.js"
+    "upload": "node parse_and_upload.js",
+    "kb-collector": "node kb_collector.js"
   },
   "engines": {
     "node": ">=22"

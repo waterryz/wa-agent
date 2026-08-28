@@ -33,6 +33,7 @@ const store = require('./store'); // старый слой: seen/blocked/escalat
 const astore = require('./assistant_store'); // новый слой: диалоги/сообщения
 const core = require('./assistant_core'); // общий пайплайн обработки
 const { createAssistantRouter } = require('./assistant_routes');
+const kbCollector = require('./kb_collector'); // авто-сбор фактов из ТГ-рассылки (инертен без TG_KB_BOT_TOKEN)
 const {
   AGENT_NAME,
   OWNER_NAME,
@@ -861,6 +862,10 @@ app.listen(PORT, () => {
   console.log(`📱 Привязка WA: http://localhost:${PORT}/qr`);
   console.log(`🤖 Ядро ассистента: POST http://localhost:${PORT}/assistant/chat`);
 });
+
+// Авто-сбор фактов из ТГ-группы рассылки в черновики базы знаний.
+// No-op, если не задан TG_KB_BOT_TOKEN — деплой без переменной безопасен.
+kbCollector.startCollector();
 
 console.log('🚀 Инициализирую WhatsApp...');
 client.initialize().catch((e) => {

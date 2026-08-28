@@ -20,6 +20,7 @@ const astore = require('./assistant_store');
 const agent = require('./agent');
 const store = require('./store'); // старый слой: seen / blocked / escalations (для админки)
 const adminAssistant = require('./admin_assistant'); // ИИ-редактор базы знаний (админский чат)
+const kbCollector = require('./kb_collector'); // сбор фактов из ТГ-рассылки + модерация черновиков
 
 // Лимит на одну картинку в base64. Важно, чтобы VISION_MAX_IMAGES × этот лимит
 // укладывался в лимит тела запроса (JSON_BODY_LIMIT в server.js, по умолчанию
@@ -359,6 +360,34 @@ function createAssistantRouter(deps = {}) {
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // ───────── Черновики из ТГ-рассылки (модерация базы знаний) ─────────
+  // Предложения фактов, собранные из группы. Прод-база knowledge меняется
+  // только когда владелец нажимает «Принять» здесь.
+  router.get('/kb-staging', requireAdmin, async (req, res) => {
+    try {
+      const status = ['pending', 'approved', 'rejected'].includes(req.query.status)
+        ? req.query.status
+        : 'pending';
+      const items = await kbCollector.listStaging({ status });
+      res.json({ items, pending: await kbCollector.countPending() });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.post('/kb-staging/:id/approve', requireAdmin, async (req, res) => {
+    try {
+      const { content } = req.body || {}; // необязательная правка текста перед принятием
+      const out = await kbCollector.approveStaging(req.params.id, content);
+      res.json(out);
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  router.post('/kb-staging/:id/reject', requireAdmin, async (req, res) => {
+    try {
+      const out = await kbCollector.rejectStaging(req.params.id);
+      res.json(out);
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   return router;
