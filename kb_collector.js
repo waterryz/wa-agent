@@ -334,9 +334,20 @@ async function pollLoop() {
       const chatId = m.chat.id;
       const text = m.text || m.caption || '';
 
-      // Режим обнаружения: помогаем найти нужный chat_id.
+      // Режим обнаружения: помогаем найти нужный chat_id. Кроме лога — пишем в БД
+      // (tg_poll_state, ключ discovered:<id>, id в last_update_id), чтобы chat_id
+      // можно было прочитать без доступа к логам Railway.
       if (!TG_KB_CHAT_ID) {
-        console.log(`🔎 сообщение из chat_id=${chatId} title="${m.chat.title || m.chat.username || '—'}"`);
+        const title = m.chat.title || m.chat.username || '—';
+        console.log(`🔎 сообщение из chat_id=${chatId} title="${title}"`);
+        try {
+          await supabase.from('tg_poll_state').upsert(
+            { bot: `discovered:${chatId}`, last_update_id: chatId, updated_at: new Date().toISOString() },
+            { onConflict: 'bot' },
+          );
+        } catch (e) {
+          console.error('⚠️  не удалось записать discovered chat:', e.message);
+        }
         continue;
       }
       if (String(chatId) !== String(TG_KB_CHAT_ID)) continue;
