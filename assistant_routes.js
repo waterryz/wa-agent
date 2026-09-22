@@ -89,6 +89,11 @@ function createAssistantRouter(deps = {}) {
 
   // ───────────────────────── ПУБЛИЧНЫЕ ─────────────────────────
 
+  router.get('/capabilities', (req, res) => {
+    if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Unauthorized' });
+    res.json({ version: '2026-09-22', fast_answers: true, service_categories: true, voice: Boolean(process.env.OPENAI_API_KEY) });
+  });
+
   // Главная точка: сайт и бот шлют сюда сообщение пользователя.
   // Поддерживает фото: images: [{b64, mime}] + необязательный photo_caption.
   router.post('/chat', async (req, res) => {
@@ -97,6 +102,9 @@ function createAssistantRouter(deps = {}) {
       const channel = b.channel;
       const external_id = b.external_id;
       const message = b.message;
+      const trusted = Boolean(adminKey && req.get('x-admin-key') === adminKey);
+      if (channel === 'telegram' && !trusted) return res.status(401).json({ error: 'Unauthorized' });
+      const faqTopic = trusted && typeof b.faq_topic === 'string' ? b.faq_topic : null;
       if (!['web', 'telegram', 'whatsapp'].includes(channel)) {
         return res.status(400).json({ error: 'Некорректный channel' });
       }
@@ -106,7 +114,7 @@ function createAssistantRouter(deps = {}) {
 
       if (!external_id) return res.status(400).json({ error: 'Нужен external_id' });
       // Фото без подписи — валидный случай: текст не обязателен, если есть картинка.
-      if (!images.length && (!message || !String(message).trim())) {
+      if (!images.length && !faqTopic && (!message || !String(message).trim())) {
         return res.status(400).json({ error: 'Нужен message или images' });
       }
 
@@ -117,9 +125,12 @@ function createAssistantRouter(deps = {}) {
         channel,
         external_id,
         message,
+        faqTopic,
+        language: ['ru', 'en', 'ka'].includes(b.language) ? b.language : null,
+        context: trusted ? b.context : null,
         contact: { name: b.name || null, email: b.email || null, phone: b.phone || null },
-        is_driver: typeof b.is_driver === 'boolean' ? b.is_driver : null,
-        driver_id: b.driver_id || null,
+        is_driver: trusted && typeof b.is_driver === 'boolean' ? b.is_driver : null,
+        driver_id: trusted ? b.driver_id || null : null,
         images: images.length ? images : null,
         photoCaption: images.length ? photoCaption ?? null : null,
         // Клиент прислал больше картинок, чем мы разбираем за раз — говорим об этом
@@ -149,6 +160,8 @@ function createAssistantRouter(deps = {}) {
         operator_mode: result.operator_mode,
         escalated: result.escalate,
         is_driver: result.is_driver,
+        fast_answer: Boolean(result.fast_answer),
+        action: result.action || null,
         // Для логов и отладки на стороне бота. base64 сюда не возвращается.
         photo: result.photo
           ? { category: result.photo.category, description: result.photo.description }
@@ -156,6 +169,21 @@ function createAssistantRouter(deps = {}) {
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Fail closed: a missing admin key must not expose a paid audio endpoint.
+  router.post('/transcribe', async (req, res) => {
+    if (!adminKey || req.get('x-admin-key') !== adminKey) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    try {
+      const text = await require('./transcribe').transcribe(req.body || {});
+      res.json({ text });
+    } catch (e) {
+      const known = ['invalid_audio', 'invalid_identity', 'voice_limit', 'voice_empty'];
+      const error = known.includes(e.message) ? e.message : 'voice_unavailable';
+      res.status(error === 'voice_limit' ? 429 : error === 'voice_unavailable' ? 503 : 400).json({ error });
     }
   });
 

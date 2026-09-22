@@ -14,6 +14,7 @@
 
 const agent = require('./agent');
 const astore = require('./assistant_store');
+const fastAnswers = require('./fast_answers');
 
 const { OWNER_NAME } = agent;
 
@@ -81,12 +82,15 @@ async function processMessage({
   photo = null,
   photoCaption = null,
   replySuffix = '',
+  faqTopic = null,
+  language = null,
+  context = null,
 }) {
   const text = (message || '').trim();
   const imageList = Array.isArray(images) ? images.filter((i) => i && i.b64 && i.mime) : [];
   const hasPhoto = Boolean(photo) || imageList.length > 0;
 
-  if (!text && !hasPhoto) throw new Error('Пустое сообщение');
+  if (!text && !hasPhoto && !faqTopic) throw new Error('Пустое сообщение');
 
   const caption = (photoCaption === null ? text : String(photoCaption || '')).trim();
 
@@ -123,7 +127,7 @@ async function processMessage({
     ? agent.photoHistoryText(photoData, caption)
     : imageList.length
       ? `[Фото${imageList.length > 1 ? ` · ${imageList.length} шт.` : ''}]${caption ? ` ${caption}` : ''}`
-      : text;
+      : text || `[FAQ: ${faqTopic}]`;
 
   // Сообщение пользователя сохраняем всегда — даже в режиме оператора,
   // чтобы человек в админке видел, что написал (или прислал) клиент.
@@ -150,6 +154,14 @@ async function processMessage({
 
   // Оператор забрал чат на себя → ИИ не отвечает.
   if (conv.operator_mode) return emptyResult({ operator_mode: true });
+
+  const fast = fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
+  if (fast) {
+    await astore.saveMessage(conv.id, 'assistant', fast.text, {
+      source: fast.source, version: fast.version, topic: fast.id, fast_answer: true,
+    });
+    return emptyResult({ reply: fast.text, fast_answer: true, action: fast.action });
+  }
 
   // История для модели: WhatsApp отдаёт свою (из самого мессенджера),
   // остальные каналы строятся из БД (там наше сообщение уже сохранено выше).
@@ -185,13 +197,15 @@ async function processMessage({
 
   const { examples, facts, embedTokens } = await agent.retrieveContext(query);
   const firstTurn = !history.some((m) => m.role === 'assistant');
-  const systemPrompt = agent.buildSystemPrompt({
+  let systemPrompt = agent.buildSystemPrompt({
     examples,
     facts,
     firstTurn,
     photo: photoData,
     photoCaption: caption,
   });
+  systemPrompt += '\nUse short, respectful instructions and one next action. Reply in the language of the user’s latest message, including Georgian. Use the term хендбук / handbook, never брошюра. Display US phone numbers without +1. Do not claim a payment, service update or attachment was filed unless the system confirms it. The DMV form can be picked up from the company or printed. Supplies are also available from the company; at the service shop the form must be handed directly to Harry or Alex. If uncertain, ask one short question.';
+  if (context) systemPrompt += '\nCurrent bot step: ' + String(context).slice(0, 300);
   const { text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history);
   let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
 
@@ -209,7 +223,7 @@ async function processMessage({
 
   const baseText =
     replyText ||
-    (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '');
+    (escalate ? `Вопрос сохранён для ${OWNER_NAME}. Для связи с компанией откройте «Контакты».` : '');
 
   // Про отброшенные по лимиту фото клиенту надо сказать честно — иначе он решит,
   // что ассистент посмотрел всё, и не пришлёт важный кадр повторно.
