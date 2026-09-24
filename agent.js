@@ -308,7 +308,8 @@ async function describeImages(images, caption = '') {
     'Верни СТРОГО JSON без markdown-обёртки:',
     '{',
     '  "category": одна из: "damage" (повреждение авто/ДТП), "document" (права, TLC-лицензия, страховка, регистрация, договор),',
-    '              "dashboard" (панель приборов, индикатор, ошибка), "payment" (чек, скриншот оплаты/банка/задолженности),',
+    '              "dashboard" (панель приборов, индикатор, ошибка), "payment" (скриншот оплаты/банка/задолженности),',
+    '              "service_receipt" (чек автосервиса с работами), "dmv" (бланк или результат DMV-инспекции),',
     '              "app" (скриншот Uber/Lyft/приложения), "car" (авто целиком, салон, без повреждений),',
     '              "other", "unclear" (не разобрать),',
     '  "description": 1-3 предложения — что на фото, максимально конкретно,',
@@ -331,6 +332,8 @@ async function describeImages(images, caption = '') {
 
     const str = vstr;
     const CATEGORIES = [
+      'service_receipt',
+      'dmv',
       'damage',
       'document',
       'dashboard',
