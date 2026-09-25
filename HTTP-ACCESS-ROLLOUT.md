@@ -27,15 +27,18 @@ The browser admin proxy must separately verify an administrator role or an expli
 Supabase Auth user-ID allowlist. A successful ordinary Supabase login is insufficient.
 Configure and verify existing administrator access before deploying that change.
 
-Review alongside the pending assistant optimization PR: both edit assistant_routes.js.
-Retain its voice cancellation, latency limits, knowledge updates and operator checks.
+This branch incorporates the pending assistant optimization PR at 0c11f144. The
+shared route conflict is resolved using the fail-closed, header-only guard while
+retaining voice cancellation, latency limits, knowledge updates and operator checks.
+Review this combined branch; the older optimization-only PR remains open for history
+and must not be merged again after the combined branch is accepted.
 This change does not enable voice, send messages, alter records, merge another PR
 or change provider keys. Database RLS is a separate layer and does not replace HTTP
 authorization.
 
 ## Validation
 
-`node --test test_http_security.js test_assistant_routes.js`
+`npm test`
 
 Tests use synthetic identities and a stubbed assistant/database. They check two
 independent sessions, cross-conversation refusal, identity spoofing, expired/tampered
