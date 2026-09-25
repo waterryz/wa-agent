@@ -58,5 +58,18 @@ build, installed Chromium compatibility and live WhatsApp checks remain prelaunc
 requirements. RemoteAuth, browser-download commands or custom install hooks would
 need a fresh review. Do not force an untested major Puppeteer override to hide audit.
 
+The production Dockerfile now runs verify_system_browser.js with BuildKit network
+disabled. It launches the actual installed system Chromium with Puppeteer and
+checks a local multilingual document and JavaScript. A failed check fails the
+image build before rollout. It does not start server.js, load WhatsApp sessions,
+send messages or access provider/database credentials. The same image can be
+checked in the existing protected assistant-preview service while retaining its
+explicit node preview_server.js start command and preview gates. This verifies
+the production browser image, not authenticated WhatsApp delivery.
+
+Billing persistence and daily-report delivery are separate rollout stages; they
+do not prevent release of the already-tested core assistant. Keep unavailable
+features clearly labelled and leave their activation disabled until connected.
+
 References: https://github.com/advisories/GHSA-jmr9-qjv8-65gv and
 https://github.com/advisories/GHSA-7pqw-9j4j-h8q3.

@@ -24,6 +24,10 @@ RUN npm ci --omit=dev --ignore-scripts
 # Затем код
 COPY . .
 
+# Fail the build before rollout if Chromium and Puppeteer cannot work together.
+# BuildKit disables network for this check; it never starts the application.
+RUN --network=none node verify_system_browser.js
+
 # Railway сам задаёт PORT
 EXPOSE 3000
 
