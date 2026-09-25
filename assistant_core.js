@@ -15,6 +15,7 @@
 const agent = require('./agent');
 const astore = require('./assistant_store');
 const fastAnswers = require('./fast_answers');
+const companyKnowledge = require('./company_knowledge');
 
 const { OWNER_NAME } = agent;
 
@@ -155,8 +156,12 @@ async function processMessage({
   // Оператор забрал чат на себя → ИИ не отвечает.
   if (conv.operator_mode) return emptyResult({ operator_mode: true });
 
-  const fast = fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
+  let fast = fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
+  const navigation = new Set(['service_choice', 'handbook', 'notes', 'payment', 'mileage', 'application', 'availability', 'service_question']);
+  if (fast && !navigation.has(fast.id) && await astore.hasReviewedKnowledgeSince('2026-09-22T00:00:00Z')) fast = null;
+  if (!fast && !hasPhoto) fast = await companyKnowledge.testAnswer(text, language);
   if (fast) {
+    if ((await astore.getConversation(conv.id)).operator_mode) return emptyResult({ operator_mode: true });
     await astore.saveMessage(conv.id, 'assistant', fast.text, {
       source: fast.source, version: fast.version, topic: fast.id, fast_answer: true,
     });
@@ -206,7 +211,17 @@ async function processMessage({
   });
   systemPrompt += '\nUse short, respectful instructions and one next action. Reply in the language of the user’s latest message, including Georgian. Use the term хендбук / handbook, never брошюра. Display US phone numbers without +1. Do not claim a payment, service update or attachment was filed unless the system confirms it. The DMV form can be picked up from the company or printed. Supplies are also available from the company; at the service shop the form must be handed directly to Harry or Alex. If uncertain, ask one short question.';
   if (context) systemPrompt += '\nCurrent bot step: ' + String(context).slice(0, 300);
-  const { text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history);
+  let rawReply, usage = {}, finishReason;
+  try {
+    ({ text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history));
+  } catch {
+    // Keep the saved question available to staff after provider failure; do not
+    // expose provider errors or keep retrying the same paid request for minutes.
+    rawReply = '';
+    finishReason = 'provider_unavailable';
+  }
+  // A staff member may have taken over while the model was answering.
+  if ((await astore.getConversation(conv.id)).operator_mode) return emptyResult({ operator_mode: true });
   let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
 
   // Модель может вернуть пустоту: у kimi-k2.6 reasoning тратит те же выходные

@@ -1,6 +1,6 @@
 // Approved navigation/service answers, versioned independently of model prompts.
 // Exact normalized aliases only: ambiguous, compound and personal requests go to AI.
-const VERSION = '2026-09-22';
+const VERSION = '2026-09-24';
 const SOURCE = 'Owner-approved bot proposals and service corrections, 2026-09-22';
 const ANSWERS = {
   service_choice: {
@@ -63,9 +63,15 @@ const ANSWERS = {
     action: 'account',
   },
   application: {
-    aliases: ['как подать заявку', 'хочу подать заявку', 'how to apply', 'how do i apply'],
-    ru: 'Нажмите «Подать заявку». Бот спросит имя, фамилию, телефон, email, стаж DMV и TLC, наличие аккаунтов Uber и Lyft.',
-    en: 'Tap “Apply to rent”. The bot will ask for your name, phone, email, DMV and TLC experience, and whether you have Uber and Lyft accounts.',
+    aliases: ['как подать заявку', 'хочу подать заявку', 'хочу арендовать машину', 'ищу машину', 'how to apply', 'how do i apply', 'i want to rent a car'],
+    ru: 'Нажмите «Подать заявку» и ответьте на вопросы. Заявка не гарантирует получение машины и не является бронированием. Возможность, условия и время выдачи Prime Fusion подтверждает отдельно.',
+    en: 'Tap “Apply to rent” and answer the questions. An application does not guarantee a car or reserve one. Prime Fusion separately confirms availability, terms and pickup time.',
+    action: 'apply',
+  },
+  availability: {
+    aliases: ['есть свободные машины', 'какие машины есть в наличии', 'машина забронирована после заявки', 'do you have cars available', 'does my application reserve a car'],
+    ru: 'Актуальное наличие нужно подтвердить в Prime Fusion. Подайте заявку: возможность, условия и время выдачи компания согласует отдельно. Заявка не гарантирует машину и не является бронированием.',
+    en: 'Prime Fusion needs to confirm current availability. Submit an application; the company will confirm availability, terms and pickup time separately. Applying does not guarantee or reserve a car.',
     action: 'apply',
   },
   test_priority: {
@@ -92,9 +98,15 @@ const ANSWERS = {
     action: 'apply',
   },
   no_accounts: {
-    aliases: ['нет убера и лифта', 'нет uber и lyft заявка пройдет', 'нет uber и lyft', 'i have no uber or lyft account'],
+    aliases: ['нет убера и лифта', 'нет uber и lyft заявка пройдет', 'нет uber и lyft', 'i have no uber or lyft account', 'can i apply without uber or lyft'],
     ru: 'Даже без Uber и Lyft можно подать заявку. Ответьте «Нет» на оба вопроса. Нужен стаж DMV не менее 1 года.',
     en: 'You can apply without Uber or Lyft accounts. Answer “No” to both questions. At least 1 year with a DMV driver license is required.',
+    action: 'apply',
+  },
+  application_requirements: {
+    aliases: ['какие требования к стажу dmv', 'какие требования к стажу дмв', 'какие требования для аренды', 'what are the requirements to apply', 'what dmv experience do i need'],
+    ru: 'Для заявки нужен стаж по правам DMV не менее 1 года. Отсутствие Uber или Lyft не мешает подать заявку. Бот также спросит о стаже TLC. Окончательные условия и возможность выдачи подтверждает Prime Fusion. Нажмите «Подать заявку».',
+    en: 'You need at least 1 year with a DMV driver license to apply. You can apply without Uber or Lyft accounts. The bot will also ask about your TLC experience. Prime Fusion confirms the final terms and whether a vehicle can be provided. Tap “Apply to rent”.',
     action: 'apply',
   },
   service_question: {
@@ -106,8 +118,16 @@ const ANSWERS = {
 };
 
 function normalize(text) {
-  return String(text || '').normalize('NFKC').toLowerCase().replace(/ё/g, 'е')
+  return String(text || '').normalize('NFKC').toLowerCase().replace(/ё/g, 'е').trim()
     .replace(/[?!.,:;]+$/g, '').replace(/\s+/g, ' ').trim();
+}
+// Strip only standalone greeting/courtesy phrases at the edges. Never use fuzzy
+// substring matching: a compound question or personal dispute must go to AI.
+function withoutCourtesy(text) {
+  let value = normalize(text);
+  const prefix = /^(?:(?:здравствуйте|добрый день|привет|подскажите|скажите|пожалуйста|hello|hi|please|could you tell me|can you tell me)(?:[\s,!:;.]+))+/iu;
+  const suffix = /(?:[\s,!:;.]+(?:пожалуйста|спасибо|заранее спасибо|please|thanks|thank you))+$/iu;
+  return normalize(value.replace(prefix, '').replace(suffix, ''));
 }
 const INDEX = new Map();
 for (const [id, answer] of Object.entries(ANSWERS)) {
@@ -116,11 +136,11 @@ for (const [id, answer] of Object.entries(ANSWERS)) {
 function lookup({ text = '', topic = null, language = null, hasPhoto = false }) {
   if (hasPhoto) return null;
   const normalized = normalize(text);
-  const id = topic && !normalized ? topic : INDEX.get(normalized);
+  const id = topic && !normalized ? topic : INDEX.get(normalized) || INDEX.get(withoutCourtesy(text));
   if (!id || !ANSWERS[id]) return null;
   const lang = /[\u10a0-\u10ff\u1c90-\u1cbf]/u.test(text) ? 'ka' : /[а-яё]/i.test(text) ? 'ru' : normalized ? 'en' : language;
   const answer = ANSWERS[id];
   if (!answer[lang]) return null;
   return { id, text: answer[lang], language: lang, action: answer.action || null, source: answer.source || SOURCE, version: VERSION };
 }
-module.exports = { lookup, normalize, ANSWERS, VERSION };
+module.exports = { lookup, normalize, withoutCourtesy, ANSWERS, VERSION };
