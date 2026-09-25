@@ -77,6 +77,23 @@ test('only supported Kimi models receive non-thinking option', () => {
   assert.deepEqual(shortAnswerOptions('different-provider'), {});
 });
 
+test('current online contact policy survives compound and foreign-language retrieval without the catalog', async () => {
+  const kb = createKnowledge({ fetchImpl: async () => { throw Error('offline'); } });
+  for (const query of [
+    'Это проверка тестовой версии, заявка не нужна. Есть ли у Prime Fusion офис и как проходит общение перед получением машины?',
+    'Can I walk into your office today or do I need an appointment?',
+    'ოფისი გაქვთ? მანქანის მისაღებად როგორ შევხვდეთ?',
+  ]) {
+    const facts = await kb.context(query);
+    const policy = facts.find(f => /нет офиса/.test(f.content));
+    assert.ok(policy?.priority, query);
+    assert.match(policy.content, /после заполнения заявки/);
+    assert.match(policy.content, /встреча назначается при выдаче машины/);
+    assert.match(policy.content, /primefusion\.cars@gmail\.com/);
+    assert.match(policy.content, /https:\/\/t\.me\/primefusiontlcbot/);
+  }
+});
+
 test('actual agent requests disable reasoning, limit output and avoid SDK retries', async () => {
   const constructors = [], requests = [];
   const envKeys = ['MOONSHOT_API_KEY', 'OPENAI_API_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'KIMI_MODEL', 'ASSISTANT_REPLY_MAX_TOKENS', 'KIMI_TIMEOUT_MS'];

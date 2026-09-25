@@ -83,7 +83,10 @@ function createKnowledge({ fetchImpl = globalThis.fetch, now = Date.now } = {}) 
     const documents = handbook.pages.filter(p => !/Оглавление|Table of contents/i.test(p.content))
       .map(p => ({ source: p.source, priority: false, content: `${p.source}\n${p.content}` }));
     const ownerFacts = approved.facts.map(content => ({ source: approved.source, priority: true, content }));
-    return [...rank(query, ownerFacts, 2), ...rank(query, testFacts, 2), ...rank(query, documents, 3)];
+    // Core contact policy must survive long questions, foreign languages and
+    // retrieval failures; older handbooks still mention a pickup address.
+    const essentialFacts = approved.essentialFacts.map(content => ({ source: approved.source, priority: true, content }));
+    return [...essentialFacts, ...rank(query, ownerFacts, 2), ...rank(query, testFacts, 2), ...rank(query, documents, 3)];
   }
   return { catalog, context, testAnswer };
 }
