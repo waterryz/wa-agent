@@ -36,6 +36,30 @@ This change does not enable voice, send messages, alter records, merge another P
 or change provider keys. Database RLS is a separate layer and does not replace HTTP
 authorization.
 
+## Read-only daily web report
+
+`GET /assistant/reports/web-messages?start=<ISO timestamp>&end=<ISO timestamp>`
+requires the same administrator header and returns only public web conversation
+messages from the existing journal. Telegram is collected by the bot itself;
+WhatsApp and internal knowledge-editor chats are excluded. The reporting window
+is half-open, at most 26 hours (including 25-hour DST days), and cannot end in the
+future. Queries use bounded ID pagination and a fixed maximum ID, a 15-second
+database request deadline and a 5,000-message limit. Errors/overflows fail the
+export instead of returning a silently truncated or empty successful report.
+
+Messages retain roles and timestamps. One preceding user message is marked as
+context, not counted as a question from this period. Current conversation status
+is not used to reconstruct a past outcome. Credentials, session identifiers,
+provider metadata and raw photos are not exported. Contact names are current
+labels, not historical identity evidence.
+
+Set `ASSISTANT_DIGEST_COVERAGE_START` only after verifying that every public web
+chat entry point records to the shared journal. Until that point the export is
+explicitly incomplete and cannot activate daily delivery. The bot companion at
+`web_digest_client.py` combines this export with its Telegram/application/service
+journal and keeps the report incomplete if either source is unavailable. This
+PR neither activates a scheduler nor sends the report.
+
 ## Validation
 
 `npm test`

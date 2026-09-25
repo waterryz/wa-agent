@@ -16,6 +16,7 @@
 
 const express = require('express');
 const { createHttpAuth, SESSION_SECONDS } = require('./http_auth');
+const { createWebDigestSource } = require('./web_digest');
 const core = require('./assistant_core');
 const astore = require('./assistant_store');
 const agent = require('./agent');
@@ -86,6 +87,19 @@ function createAssistantRouter(deps = {}) {
   // ── защита админских маршрутов ──
   // Missing configuration never opens administrator access. Keys in URLs are
   // deliberately unsupported (URLs can enter history and proxy logs).
+
+  router.get('/reports/web-messages', requireAdmin, async (req, res) => {
+    try {
+      const source = createWebDigestSource(astore.supabase, {
+        coverageStart: process.env.ASSISTANT_DIGEST_COVERAGE_START || '',
+      });
+      res.json(await source.readWindow(req.query.start, req.query.end));
+    } catch (error) {
+      res.status(error.status === 400 ? 400 : 503).json({
+        error: error.status === 400 ? 'invalid_report_period' : 'web_report_unavailable',
+      });
+    }
+  });
 
   // ───────────────────────── ПУБЛИЧНЫЕ ─────────────────────────
 
