@@ -20,6 +20,9 @@ require('dotenv').config();
 const OpenAI = require('openai');
 const { supabase } = require('./assistant_store');
 const { embed, toolAdd, toolUpdate } = require('./admin_assistant');
+const { shortAnswerOptions } = require('./model_options');
+const { createDraftNotifier } = require('./draft_notifications');
+const draftNotifier = createDraftNotifier({ db: supabase });
 
 // ── Конфиг ───────────────────────────────────────────────────────────
 const TG_KB_BOT_TOKEN = (process.env.TG_KB_BOT_TOKEN || '').trim();
@@ -30,7 +33,7 @@ const TG_KB_CHAT_ID = (process.env.TG_KB_CHAT_ID || '').trim();
 
 const KIMI_MODEL = process.env.KIMI_MODEL || 'kimi-k2.6';
 const KIMI_BASE_URL = process.env.KIMI_BASE_URL || 'https://api.moonshot.ai/v1';
-const kimi = new OpenAI({ apiKey: process.env.MOONSHOT_API_KEY, baseURL: KIMI_BASE_URL });
+const kimi = new OpenAI({ apiKey: process.env.MOONSHOT_API_KEY, baseURL: KIMI_BASE_URL, maxRetries: 0, timeout: 15000 });
 
 // Порог, выше которого считаем, что факт уже есть в базе → предлагаем UPDATE.
 const DEDUP_SIMILARITY = parseFloat(process.env.KB_DEDUP_SIMILARITY || '0.86');
@@ -68,7 +71,7 @@ function grobPass(text) {
   if (t.length < 12) return false; // слишком коротко для факта
   if (/^[/!]/.test(t)) return false; // команды бота
   if (isChatter(t)) return false; // сообщение целиком — приветствие/подтверждение
-  const letters = (t.match(/[a-zA-Zа-яА-ЯёЁ]/g) || []).length;
+  const letters = (t.match(/\p{L}/gu) || []).length;
   if (letters < 8) return false; // одни эмодзи/ссылки/цифры без текста
   return true;
 }
@@ -96,15 +99,17 @@ function extractJson(raw) {
 
 // ── Классификатор + нормализация факта ───────────────────────────────
 // Возвращает {is_fact:boolean, fact:string, reason:string}.
-async function classify(text) {
+async function classify(text, publishedAt = null) {
   const strict = GROUP_TRUST === 'mixed';
   const sys = [
     'Ты — фильтр базы знаний компании Prime Fusion Inc (аренда авто под такси TLC в Нью-Йорке).',
-    'На вход — одно сообщение из рабочей группы компании. Реши, содержит ли оно УСТОЙЧИВЫЙ, ПОВТОРНО ПРИМЕНИМЫЙ факт,',
+    'На вход — одно сообщение из рабочей группы компании. Реши, содержит ли оно полезное клиентам правило или объявление,',
     'который полезен клиентскому ИИ-помощнику: условия аренды, тарифы и депозиты, правила эксплуатации,',
     'документы и требования, процедуры (выдача/возврат/ДТП/ТО), сроки, контакты, характеристики автомобилей, акции.',
     '',
-    'НЕ факт (is_fact=false): приветствия и благодарности, эмоции, разовая логистика («привезу завтра», «буду через час»),',
+    'Временные объявления компании (например, закрытие сервиса в определённый день) тоже нужны. Сохраняй даты действия; не превращай их в постоянное правило.',
+    publishedAt ? `Дата исходного сообщения: ${publishedAt}. Относительные даты относятся к этому сообщению, а не к будущему вопросу клиента.` : 'Если дата действия неизвестна, не придумывай её.',
+    'НЕ факт (is_fact=false): приветствия и благодарности, эмоции, личная разовая логистика («привезу завтра», «буду через час»),',
     'вопросы без ответа, обсуждения и переписка между людьми, личные сообщения, пересланные мемы, статусы оплаты конкретного человека.',
     strict
       ? 'В группе пишут в том числе водители — будь СТРОГИМ: бери только явные фактические утверждения о правилах/условиях компании.'
@@ -120,6 +125,7 @@ async function classify(text) {
 
   const resp = await kimi.chat.completions.create({
     model: KIMI_MODEL,
+    ...shortAnswerOptions(KIMI_MODEL),
     messages: [
       { role: 'system', content: sys },
       { role: 'user', content: String(text || '') },
@@ -127,7 +133,7 @@ async function classify(text) {
     // kimi-k2.6 — reasoning-модель: токены уходят и на «размышление», и на ответ.
     // Мало → finish_reason:length и пустой content (факт потерян). Детальный промпт
     // раздувает reasoning, поэтому держим большой запас.
-    max_tokens: 4096,
+    max_tokens: shortAnswerOptions(KIMI_MODEL).thinking ? 1200 : 4096,
     response_format: { type: 'json_object' },
   });
 
@@ -143,13 +149,17 @@ async function classify(text) {
 }
 
 // ── Дедуп + постановка в очередь черновиков ──────────────────────────
-async function stageMessage({ chatId, messageId, author, text }) {
-  if (!grobPass(text)) return { skipped: 'grob' };
+async function stageMessage({ chatId, messageId, author, text, publishedAt = null }) {
+  const previous = await supabase.from('knowledge_staging').select('*')
+    .eq('tg_chat_id', String(chatId)).eq('tg_message_id', messageId).maybeSingle();
+  if (previous.error) throw Error('staging read failed');
+  if (previous.data?.raw_text === text) return { skipped: 'duplicate_message' };
+  if (!previous.data && !grobPass(text)) return { skipped: 'grob' };
 
-  const c = await classify(text);
-  if (!c.is_fact) return { skipped: 'not_fact', reason: c.reason };
+  const c = grobPass(text) ? await classify(text, publishedAt) : { is_fact: false, reason: 'short_edit' };
+  if (!c.is_fact && !previous.data) return { skipped: 'not_fact', reason: c.reason };
 
-  const fact = c.fact;
+  const fact = c.is_fact ? c.fact : `Изменённая публикация: ${String(text).trim()}`;
   const e = await embed(fact);
   const { data, error } = await supabase.rpc('match_knowledge', {
     query_embedding: e,
@@ -168,6 +178,13 @@ async function stageMessage({ chatId, messageId, author, text }) {
     target_id = top.id;
     target_before = top.content;
   }
+  if (previous.data?.applied_knowledge_id) {
+    // An edit to an approved post proposes replacing that exact fact, not a fuzzy neighbour.
+    const existing = await supabase.from('knowledge').select('id,content')
+      .eq('id', previous.data.applied_knowledge_id).maybeSingle();
+    if (existing.error) throw Error('staging target read failed');
+    if (existing.data) { action = 'update'; target_id = existing.data.id; target_before = existing.data.content; }
+  }
 
   // upsert с ignoreDuplicates: повторная обработка того же сообщения не плодит дубли.
   const { data: ins, error: insErr } = await supabase
@@ -184,8 +201,9 @@ async function stageMessage({ chatId, messageId, author, text }) {
         target_before,
         similarity,
         status: 'pending',
+        reviewed_at: null,
       },
-      { onConflict: 'tg_chat_id,tg_message_id', ignoreDuplicates: true },
+      { onConflict: 'tg_chat_id,tg_message_id' },
     )
     .select('id')
     .maybeSingle();
@@ -285,9 +303,10 @@ async function getOffset() {
 }
 
 async function setOffset(id) {
-  await supabase
+  const { error } = await supabase
     .from('tg_poll_state')
     .upsert({ bot: POLL_TAG, last_update_id: id, updated_at: new Date().toISOString() }, { onConflict: 'bot' });
+  if (error) throw Error('collector offset save failed');
 }
 
 async function tgGetUpdates(offset) {
@@ -297,7 +316,7 @@ async function tgGetUpdates(offset) {
     body: JSON.stringify({
       offset,
       timeout: POLL_TIMEOUT,
-      allowed_updates: ['message', 'channel_post'],
+      allowed_updates: ['message', 'channel_post', 'edited_message', 'edited_channel_post'],
     }),
   });
   const data = await r.json();
@@ -317,6 +336,8 @@ async function pollLoop() {
   }
 
   while (running) {
+    try { await draftNotifier.flush(); }
+    catch { console.error('⚠️ Черновик сохранён; уведомление в админ-канал будет повторено.'); }
     let updates;
     try {
       updates = await tgGetUpdates(nextOffset);
@@ -328,7 +349,7 @@ async function pollLoop() {
 
     for (const u of updates) {
       nextOffset = u.update_id + 1;
-      const m = u.message || u.channel_post;
+      const m = u.message || u.channel_post || u.edited_message || u.edited_channel_post;
       if (!m || !m.chat) continue;
 
       const chatId = m.chat.id;
@@ -359,7 +380,8 @@ async function pollLoop() {
         null;
 
       try {
-        const res = await stageMessage({ chatId, messageId: m.message_id, author, text });
+        const publishedAt = m.date ? new Date(m.date * 1000).toLocaleString('en-CA', { timeZone: 'America/New_York' }) + ' America/New_York' : null;
+        const res = await stageMessage({ chatId, messageId: m.message_id, author, text, publishedAt });
         if (res.staged) {
           console.log(`✅ черновик #${res.id} (${res.staged}, sim=${res.similarity ?? '—'}): ${text.slice(0, 70)}`);
         } else {
@@ -367,6 +389,10 @@ async function pollLoop() {
         }
       } catch (e) {
         console.error('⚠️  обработка сообщения:', e.message);
+        // Do not acknowledge a post that was not saved. The next poll retries
+        // this update; earlier successful posts are deduplicated before any AI call.
+        nextOffset = u.update_id;
+        break;
       }
     }
 

@@ -1,5 +1,14 @@
 # Деплой веб-версии на Railway
 
+> Уточнение для подготовленного обновления 2026-09-25: текущие Dockerfile и
+> `npm start` запускают `server.js`; разделы ниже описывают отдельный запуск
+> `web.js`. Для WhatsApp (`server.js` и `bot.js`) требуется установленный Chromium
+> и абсолютный путь `CHROME_PATH` либо `PUPPETEER_EXECUTABLE_PATH`. Docker задаёт
+> `/usr/bin/chromium` и устанавливает зависимости с флагом `--ignore-scripts`.
+> Без корректного пути запуск останавливается. Перед выпуском следуйте
+> согласованным `BILLING-ROLLOUT.md` и `HTTP-ACCESS-ROLLOUT.md`;
+> старые инструкции ниже не разрешают прямой деплой.
+
 `web.js` = веб-чат с Alex (тест без WhatsApp) + панель исключений.
 WhatsApp / puppeteer / Chrome для веб-версии НЕ нужны.
 

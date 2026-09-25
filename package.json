@@ -5,6 +5,7 @@
   "private": true,
   "main": "server.js",
   "scripts": {
+    "test": "node --test test_assistant_simple.js test_fast_answers.js test_assistant_routes.js test_http_security.js test_web_digest.js test_service_billing.js test_system_browser.js test_preview_server.js",
     "start": "node server.js",
     "server": "node server.js",
     "web": "node web.js",
@@ -23,6 +24,6 @@
     "openai": "^4.67.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.26.0"
+    "whatsapp-web.js": "1.34.7"
   }
 }

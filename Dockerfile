@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Puppeteer не качает свой Chromium — используем системный
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV CHROME_PATH=/usr/bin/chromium
 
@@ -18,10 +19,15 @@ WORKDIR /app
 
 # Сначала зависимости (кэшируется отдельно от кода)
 COPY package*.json ./
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Затем код
 COPY . .
+
+# Fail the build before rollout if Chromium and Puppeteer cannot work together.
+# The check uses an offline local page and never starts the application.
+# Railway's Dockerfile validator does not support RUN --network.
+RUN node verify_system_browser.js
 
 # Railway сам задаёт PORT
 EXPOSE 3000
