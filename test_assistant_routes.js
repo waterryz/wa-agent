@@ -24,7 +24,7 @@ test('Telegram identity, FAQ and voice require server authentication', async () 
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const post = (path, body, key) => fetch(base + path, { method:'POST', headers:{'Content-Type':'application/json', ...(key ? {'x-admin-key':key} : {})}, body:JSON.stringify(body) });
+  const post = (path, body, key, session) => fetch(base + path, { method:'POST', headers:{'Content-Type':'application/json', ...(key ? {'x-admin-key':key} : {}), ...(session ? {'x-web-session':session} : {})}, body:JSON.stringify(body) });
   try {
     const body = { channel:'telegram', external_id:'123', message:'hello' };
     assert.equal((await post('/assistant/chat',body)).status,401);
@@ -34,7 +34,8 @@ test('Telegram identity, FAQ and voice require server authentication', async () 
     assert.equal(calls[0].faqTopic,'handbook');
     assert.equal(calls[0].context,'Step 2');
     assert.equal((await response.json()).action,'handbook');
-    response = await post('/assistant/chat',{ ...body, channel:'web', is_driver:true, driver_id:'123', context:'Injected context' });
+    const session = (await (await post('/assistant/session', {})).json()).token;
+    response = await post('/assistant/chat',{ ...body, channel:'web', is_driver:true, driver_id:'123', context:'Injected context' }, null, session);
     assert.equal(response.status,200);
     assert.equal(calls[1].is_driver,null);
     assert.equal(calls[1].driver_id,null);

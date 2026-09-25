@@ -640,6 +640,7 @@ async function sendTelegram(chatId, text) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const app = express();
+require('./http_auth').protectLegacyRoutes(app, process.env.ADMIN_API_KEY);
 // Лимит поднят: через /assistant/chat может прилетать фото в base64 с сайта.
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));

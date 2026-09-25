@@ -15,6 +15,7 @@
 //   POST /assistant/conversations/:id/read          — отметить прочитанным
 
 const express = require('express');
+const { createHttpAuth, SESSION_SECONDS } = require('./http_auth');
 const core = require('./assistant_core');
 const astore = require('./assistant_store');
 const agent = require('./agent');
@@ -72,6 +73,9 @@ function parseImages(raw) {
 function createAssistantRouter(deps = {}) {
   const { sendTelegram, sendWhatsApp, onEscalation, onBlockedChange, adminKey } = deps;
   const router = express.Router();
+  const auth = createHttpAuth(adminKey);
+  const requireAdmin = auth.requireAdmin;
+  router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   // Тело уже разобрано глобальным express.json() в server.js (лимит JSON_BODY_LIMIT,
   // по умолчанию 25mb — под фото в base64). Второй парсер здесь не нужен: body-parser
   // видит req._body и всё равно пропустил бы запрос, создавая ложное впечатление,
@@ -80,14 +84,16 @@ function createAssistantRouter(deps = {}) {
   router.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 
   // ── защита админских маршрутов ──
-  function requireAdmin(req, res, next) {
-    if (!adminKey) return next(); // ключ не задан → не проверяем (локальная разработка)
-    const key = req.get('x-admin-key') || req.query.key;
-    if (key !== adminKey) return res.status(401).json({ error: 'Доступ запрещён' });
-    next();
-  }
+  // Missing configuration never opens administrator access. Keys in URLs are
+  // deliberately unsupported (URLs can enter history and proxy logs).
 
   // ───────────────────────── ПУБЛИЧНЫЕ ─────────────────────────
+
+  router.post('/session', (req, res) => {
+    const token = auth.issueSession();
+    if (!token) return res.status(503).json({ error: 'Chat access is not configured' });
+    res.json({ token, expires_in: SESSION_SECONDS });
+  });
 
   router.get('/capabilities', (req, res) => {
     if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Unauthorized' });
@@ -100,10 +106,15 @@ function createAssistantRouter(deps = {}) {
     try {
       const b = req.body || {};
       const channel = b.channel;
-      const external_id = b.external_id;
+      let external_id = b.external_id;
       const message = b.message;
-      const trusted = Boolean(adminKey && req.get('x-admin-key') === adminKey);
-      if (channel === 'telegram' && !trusted) return res.status(401).json({ error: 'Unauthorized' });
+      const trusted = auth.isAdmin(req);
+      if (['telegram', 'whatsapp'].includes(channel) && !trusted) return res.status(401).json({ error: 'Unauthorized' });
+      if (channel === 'web' && !trusted) {
+        const session = auth.readSession(req.get('x-web-session'));
+        if (!session) return res.status(401).json({ error: 'Invalid chat session' });
+        external_id = session.external_id;
+      }
       const faqTopic = trusted && typeof b.faq_topic === 'string' ? b.faq_topic : null;
       if (!['web', 'telegram', 'whatsapp'].includes(channel)) {
         return res.status(400).json({ error: 'Некорректный channel' });
@@ -138,7 +149,7 @@ function createAssistantRouter(deps = {}) {
         replySuffix: dropped
           ? `P.S. Посмотрел первые ${images.length} фото из ${images.length + dropped} — ` +
             `остальные пришлите отдельным сообщением, если они важны.`
-          : String(b.reply_suffix || ''),
+          : trusted ? String(b.reply_suffix || '') : '',
       });
 
       // Эскалацию дублируем в старую панель «Переданные вопросы», если задан хук.
@@ -221,8 +232,18 @@ function createAssistantRouter(deps = {}) {
   // Поллинг новых ответов (ИИ + оператор) для веб-чата.
   router.get('/conversations/:id/poll', async (req, res) => {
     try {
-      const after = parseInt(req.query.after || '0', 10) || 0;
+      const trusted = auth.isAdmin(req);
+      const session = trusted ? null : auth.readSession(req.get('x-web-session'));
+      if (!trusted && !session) return res.status(401).json({ error: 'Unauthorized' });
+      const id = Number(req.params.id);
+      const after = Number(req.query.after || '0');
+      if (!Number.isSafeInteger(id) || id < 1 || !Number.isSafeInteger(after) || after < 0) {
+        return res.status(400).json({ error: 'Invalid message cursor' });
+      }
       const conv = await astore.getConversation(req.params.id);
+      if (!conv || (!trusted && (conv.channel !== 'web' || conv.external_id !== session.external_id))) {
+        return res.status(404).json({ error: 'Conversation not found' });
+      }
       const replies = await astore.getRepliesSince(req.params.id, after);
       res.json({
         operator_mode: conv.operator_mode,

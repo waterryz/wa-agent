@@ -34,6 +34,12 @@
 <div class="wrap">
   <p style="margin:0 0 10px"><a href="/" style="color:#3b82f6;text-decoration:none">← Чат с Alex</a></p>
   <h1>Исключения бота</h1>
+  <div class="card">
+    <label for="adminKey">Ключ администратора</label>
+    <input type="password" id="adminKey" autocomplete="off" />
+    <button onclick="refresh()">Открыть панель</button>
+    <p>Ключ используется только в этой вкладке и не сохраняется.</p>
+  </div>
   <p class="sub">Контакты из списка бот <b>игнорирует</b> — не отвечает им автоматически (жена, дочь и т.д.).<br/>Изменения применяются в течение ~15 секунд.</p>
 
   <div class="card">
@@ -67,7 +73,9 @@
 
 <script>
 async function api(method, url, body){
-  const r = await fetch(url, {method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
+  const key = document.getElementById('adminKey').value;
+  if (!key) throw new Error('Введите ключ администратора');
+  const r = await fetch(url, {method, headers:{'Content-Type':'application/json','x-admin-key':key}, body: body?JSON.stringify(body):undefined});
   if(!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.error || r.statusText); }
   return r.json();
 }
@@ -147,8 +155,7 @@ async function resolveEsc(id){
 }
 
 function refresh(){ loadEscalations(); loadBlocked(); loadSeen(); }
-refresh();
-setInterval(refresh, 10000);
+setInterval(() => { if (document.getElementById('adminKey').value) refresh(); }, 10000);
 </script>
 </body>
 </html>
