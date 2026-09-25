@@ -71,6 +71,7 @@ function parseImages(raw) {
  * @param {function} [deps.onEscalation]  async ({channel,external_id,name,question,reason}) — лог эскалации (для совместимости со старой панелью)
  * @param {function} [deps.onBlockedChange] async () => вызывается после изменения списка исключений (освежить кэш)
  * @param {string}   [deps.adminKey]      секрет для админских эндпоинтов
+ * @param {boolean}  [deps.readOnlyAdmin] skip implicit admin writes in preview GET/HEAD requests
  */
 function createAssistantRouter(deps = {}) {
   const { sendTelegram, sendWhatsApp, onEscalation, onBlockedChange, adminKey } = deps;
@@ -286,7 +287,9 @@ function createAssistantRouter(deps = {}) {
     try {
       const conv = await astore.getConversation(req.params.id);
       const messages = await astore.getMessages(req.params.id);
-      await astore.markAdminRead(req.params.id); // открыли → прочитано
+      // The preview shares storage with production. Merely viewing a conversation
+      // must not consume the owner's unread queue (including implicit HEADs).
+      if (!deps.readOnlyAdmin) await astore.markAdminRead(req.params.id);
       res.json({ conversation: conv, messages });
     } catch (e) {
       res.status(500).json({ error: e.message });

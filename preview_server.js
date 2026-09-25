@@ -43,7 +43,7 @@ function createPreviewApp(env = process.env, routerFactory) {
     return res.status(403).json({ error: 'preview_read_only' });
   });
   const createRouter = routerFactory || require('./assistant_routes').createAssistantRouter;
-  app.use('/assistant', createRouter({ adminKey }));
+  app.use('/assistant', createRouter({ adminKey, readOnlyAdmin: true }));
   return app;
 }
 

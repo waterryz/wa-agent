@@ -23,6 +23,9 @@ approvals and billing edits are blocked, even for administrators. Admin GETs
 still require the administrator key, not the preview gate. No send callbacks are
 installed. Test web sessions use a separate signing key, so existing browser
 sessions and customer conversation IDs cannot be reused to inject messages.
+Conversation-detail GET/HEAD also skip the production router's implicit
+mark-as-read write. Regression checks exercise the actual router behind the
+preview gate and verify that production retains its existing behavior.
 
 If using the existing Supabase project, synthetic web test conversations WILL
 be stored in its journal and Kimi/OpenAI test calls consume normal API credits.

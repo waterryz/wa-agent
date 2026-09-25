@@ -16,7 +16,7 @@ test('preview refuses incomplete configuration and messaging credentials before 
 test('HTTP preview requires server authentication, permits signed web chat, blocks all sends and administrative writes', async () => {
   const calls = [];
   const app = createPreviewApp(env, ({ adminKey, ...deps }) => {
-    assert.deepEqual(deps, {}); // No send or escalation hooks are installed.
+    assert.deepEqual(deps, { readOnlyAdmin: true }); // No send or escalation hooks.
     const router = express.Router(), auth = createHttpAuth(adminKey);
     router.post('/session', (_req, res) => res.json({ token: auth.issueSession() }));
     router.post('/chat', auth.requireSession, (req, res) => {
