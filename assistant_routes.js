@@ -17,6 +17,7 @@
 const express = require('express');
 const { createHttpAuth, SESSION_SECONDS } = require('./http_auth');
 const { createWebDigestSource } = require('./web_digest');
+const { mountBilling } = require('./service_billing');
 const core = require('./assistant_core');
 const astore = require('./assistant_store');
 const agent = require('./agent');
@@ -83,6 +84,7 @@ function createAssistantRouter(deps = {}) {
   // что у роутера свой лимит. Строка ниже — на случай монтирования роутера в другое
   // приложение без глобального парсера.
   router.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
+  mountBilling(router, requireAdmin, { supabase: astore.supabase });
 
   // ── защита админских маршрутов ──
   // Missing configuration never opens administrator access. Keys in URLs are
