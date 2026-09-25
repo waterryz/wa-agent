@@ -33,7 +33,7 @@ async function readJson(fetchImpl, url, key, signal) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-function createBilling({ supabase, fetchImpl = globalThis.fetch, env = process.env, now = Date.now }) {
+function createBilling({ supabase, fetchImpl = globalThis.fetch, env = process.env, now = Date.now, readOnly = false }) {
   const cache = new Map(), pending = new Map();
   async function cached(id, seconds, task) {
     const hit = cache.get(id); if (hit && now() - hit.time < seconds * 1000) return hit.value;
@@ -87,12 +87,21 @@ function createBilling({ supabase, fetchImpl = globalThis.fetch, env = process.e
     throw Error('incomplete');
   }
   async function read() {
-    const records = await supabase.from('service_billing').select('id,data,version,updated_at').in('id', IDS);
-    if (records.error || !Array.isArray(records.data) || records.data.length !== IDS.length) throw Error('storage');
-    const [k, o] = await Promise.all([cached('kimi', 60, kimi), cached('openai', 900, openai)]);
-    return { version: 1, generatedAt: new Date(now()).toISOString(), currency: 'USD', records: records.data, live: { kimi: k, openai: o } };
+    // Live provider balances do not depend on the optional manual ledger.
+    // A missing/failed ledger is explicit, never fabricated as six empty accounts.
+    const ledger = async () => {
+      try {
+        const r = await supabase.from('service_billing').select('id,data,version,updated_at').in('id', IDS);
+        if (r.error || !Array.isArray(r.data) || r.data.length !== IDS.length ||
+            new Set(r.data.map(row => row.id)).size !== IDS.length || r.data.some(row => !IDS.includes(row.id))) throw Error('storage');
+        return { records: r.data, manual: { status: 'available', writable: !readOnly } };
+      } catch { return { records: [], manual: { status: 'unavailable', writable: false } }; }
+    };
+    const [stored, k, o] = await Promise.all([ledger(), cached('kimi', 60, kimi), cached('openai', 900, openai)]);
+    return { version: 1, generatedAt: new Date(now()).toISOString(), currency: 'USD', ...stored, live: { kimi: k, openai: o } };
   }
   async function save(body) {
+    if (readOnly) throw Error('read_only');
     const v = validateRecord(body, now());
     const { data, error } = await supabase.from('service_billing').update({ data: v.data, version: v.version + 1,
       updated_at: new Date(now()).toISOString() }).eq('id', v.id).eq('version', v.version).select('id,data,version,updated_at');
@@ -112,8 +121,8 @@ function mountBilling(router, requireAdmin, options) {
   router.post('/billing', requireAdmin, async (req, res) => {
     if (Object.keys(req.query).length || JSON.stringify(req.body || {}).length > 4096) return res.status(400).json({ error: 'invalid' });
     try { res.json(await billing.save(req.body)); }
-    catch (e) { const code = ['invalid', 'conflict'].includes(e.message) ? e.message : 'billing_unavailable';
-      res.status(code === 'invalid' ? 400 : code === 'conflict' ? 409 : 503).json({ error: code }); }
+    catch (e) { const code = ['invalid', 'conflict', 'read_only'].includes(e.message) ? e.message : 'billing_unavailable';
+      res.status(code === 'invalid' ? 400 : code === 'conflict' ? 409 : code === 'read_only' ? 403 : 503).json({ error: code }); }
   });
 }
 module.exports = { createBilling, mountBilling, validateRecord, IDS };

@@ -5,6 +5,12 @@ separate balance, spend and invoice amounts, preserve manual-entry timestamps an
 use optimistic versions to reject stale concurrent edits. Payment links point to
 official provider consoles; no payment is initiated by this service.
 
+Live provider reads also work before the manual ledger migration. Missing,
+incomplete or failed storage returns `manual.status=unavailable`, no records and
+`writable=false`; it never fabricates zero balances or invoices. The companion
+UI displays that limitation alongside independently verified provider values.
+The HTTP preview disables manual edits even when storage exists.
+
 Apply service_billing.sql only during an approved rollout, verify service-role
 permissions, and deploy the matching site proxy. The migration has NOT been applied.
 Use the existing ADMIN_API_KEY for the server-to-server admin guard. No browser gets
@@ -17,10 +23,11 @@ OPENAI_BILLING_PROJECT_IDS only after verifying the account and scope. It report
 costs, not credits. Other providers use dated manual records. Unknown is not zero;
 the $30 monthly planning target is not a spending limit or verified hosting bill.
 
-37 offline tests passed after dependency updates, including auth, provider-response
+41 offline tests passed, including auth, provider-response
 validation, concurrency, assistant behavior, report export and system-browser
-selection. No model/provider request, authenticated WhatsApp session, live report,
-database migration or deployment was run.
+selection, partial ledger failures and preview read-only behavior. Live chat and
+owner admin reads are verified separately in the staging report. Ledger SQL,
+live manual persistence, full bot report and WhatsApp runtime remain unverified.
 
 ## Dependency finding still open
 

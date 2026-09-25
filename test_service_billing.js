@@ -69,9 +69,24 @@ test('compare-and-set prevents a stale editor from overwriting account balances'
   const db = database(), api = createBilling({ supabase: db, env: {}, now: () => NOW });
   assert.equal((await api.save(form())).version, 1); await assert.rejects(api.save(form()), /conflict/); assert.equal(db.updates, 1);
 });
-test('incomplete or failed storage cannot masquerade as unknown empty successful account list', async () => {
-  const api = createBilling({ env: {}, supabase: { from: () => ({ select: () => ({ in: async () => ({ data: [], error: null }) }) }) } });
-  await assert.rejects(api.read(), /storage/);
+test('missing, failed or incomplete ledger preserves live balance with explicit unavailable storage and no writable records', async () => {
+  const good = database();
+  for (const result of [{ data: [], error: null }, { data: good.rows, error: { message: 'secret-database-error' } },
+    { data: [...good.rows.slice(1), good.rows[1]], error: null }, null]) {
+    const api = createBilling({ env: { MOONSHOT_API_KEY: 'synthetic-key' }, now: () => NOW,
+      fetchImpl: async () => Response.json({ code: 0, status: true, data: { available_balance: 3, cash_balance: 3, voucher_balance: 0 } }),
+      supabase: { from: () => ({ select: () => ({ in: async () => { if (!result) throw Error('secret-network-error'); return result; } }) }) } });
+    const snapshot = await api.read();
+    assert.deepEqual(snapshot.manual, { status: 'unavailable', writable: false });
+    assert.deepEqual(snapshot.records, []); assert.equal(snapshot.live.kimi.balance, 3);
+    assert.equal(snapshot.live.openai.status, 'not_configured'); assert.ok(!JSON.stringify(snapshot).includes('secret-'));
+  }
+});
+
+test('preview billing with an available ledger is still read-only', async () => {
+  const db = database(), api = createBilling({ supabase: db, env: {}, readOnly: true });
+  assert.deepEqual((await api.read()).manual, { status: 'available', writable: false });
+  await assert.rejects(api.save(form()), /read_only/); assert.equal(db.updates, 0);
 });
 test('HTTP billing rejects non-admins, URL keys and payment operations; authenticated save persists only metadata', async () => {
   const app = express(), db = database(); app.use(express.json());

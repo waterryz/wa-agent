@@ -85,7 +85,7 @@ function createAssistantRouter(deps = {}) {
   // что у роутера свой лимит. Строка ниже — на случай монтирования роутера в другое
   // приложение без глобального парсера.
   router.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
-  mountBilling(router, requireAdmin, { supabase: astore.supabase });
+  mountBilling(router, requireAdmin, { supabase: astore.supabase, readOnly: Boolean(deps.readOnlyAdmin) });
 
   // ── защита админских маршрутов ──
   // Missing configuration never opens administrator access. Keys in URLs are
