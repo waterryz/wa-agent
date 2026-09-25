@@ -17,9 +17,10 @@ OPENAI_BILLING_PROJECT_IDS only after verifying the account and scope. It report
 costs, not credits. Other providers use dated manual records. Unknown is not zero;
 the $30 monthly planning target is not a spending limit or verified hosting bill.
 
-35 offline tests passed after dependency updates, including auth, provider-response
-validation, concurrency, assistant behavior and report export. No model/provider
-request, WhatsApp session, live report, database migration or deployment was run.
+37 offline tests passed after dependency updates, including auth, provider-response
+validation, concurrency, assistant behavior, report export and system-browser
+selection. No model/provider request, authenticated WhatsApp session, live report,
+database migration or deployment was run.
 
 ## Dependency finding still open
 
@@ -29,13 +30,26 @@ from extract-zip (GHSA-jmr9-qjv8-65gv and GHSA-7pqw-9j4j-h8q3). There is no patc
 extract-zip version in the advisory and the current compatible browsers 2.x chain
 still uses it. Do not claim the assistant dependency audit is clean.
 
-The Dockerfile skips Puppeteer browser downloads and uses distribution Chromium;
-npm ci now fails on a lock mismatch instead of falling back to npm install. This
-avoids that browser-download path in the documented image but does not remove the
-vulnerable package or prove all archive paths unreachable. Before launch, resolve
-with an upstream-compatible dependency or document and verify a narrow runtime
-mitigation. Do not force an untested major Puppeteer override just to silence audit.
-Docker build and live WhatsApp compatibility remain untested.
+The draft now contains a narrow mitigation for the current LocalAuth deployment:
+
+- Docker uses distribution Chromium and npm ci --omit=dev --ignore-scripts, so
+  dependency lifecycle hooks cannot download and extract browser archives during
+  that installation. A lock mismatch fails instead of falling back to npm install.
+- Both WhatsApp entry points require an absolute, existing executable path via
+  CHROME_PATH or PUPPETEER_EXECUTABLE_PATH. A missing/invalid path fails startup;
+  neither entry point implicitly selects a downloaded browser from Puppeteer cache.
+- Local Puppeteer installs default to skipDownload via .puppeteerrc.cjs. Environment
+  overrides can change that local default; the Docker install also skips scripts.
+- The current clients use LocalAuth directories, not RemoteAuth session archives.
+  An offline test exercises the installed whatsapp-web.js initialization through
+  LocalAuth to a mocked Puppeteer launch and verifies the explicit browser path.
+  No actual browser or remote connection is started by that test.
+
+The vulnerable package remains installed, and these measures do not repair its
+archive extractor or prove every possible future use unreachable. Docker image
+build, installed Chromium compatibility and live WhatsApp checks remain prelaunch
+requirements. RemoteAuth, browser-download commands or custom install hooks would
+need a fresh review. Do not force an untested major Puppeteer override to hide audit.
 
 References: https://github.com/advisories/GHSA-jmr9-qjv8-65gv and
 https://github.com/advisories/GHSA-7pqw-9j4j-h8q3.

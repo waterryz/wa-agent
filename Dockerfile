@@ -19,7 +19,7 @@ WORKDIR /app
 
 # Сначала зависимости (кэшируется отдельно от кода)
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Затем код
 COPY . .

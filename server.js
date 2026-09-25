@@ -19,6 +19,7 @@ const path = require('path');
 const express = require('express');
 const QRCode = require('qrcode'); // генерация QR как data-URL картинки
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const { systemBrowserPath } = require('./system_browser');
 
 // sharp — опционально: если пакет не установлен, фото уйдут без сжатия
 // (дороже по входным токенам, но работать всё равно будет).
@@ -529,8 +530,7 @@ const client = new Client({
   puppeteer: {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-    executablePath:
-      process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    executablePath: systemBrowserPath(),
   },
 });
 
