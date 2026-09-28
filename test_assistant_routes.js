@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 const express = require('express');
 
-test('Telegram identity, FAQ and voice require server authentication', async () => {
+test('Telegram identity and FAQ require server authentication; cancelled voice is unavailable', async () => {
   const calls = [];
   const old = Module._load;
   Module._load = function(request, parent) {
@@ -39,10 +39,10 @@ test('Telegram identity, FAQ and voice require server authentication', async () 
     assert.equal(calls[1].is_driver,null);
     assert.equal(calls[1].driver_id,null);
     assert.equal(calls[1].context,null);
-    assert.equal((await post('/assistant/transcribe',{audio:'AAAA',filename:'x.ogg'})).status,401);
-    assert.equal((await post('/no-key/transcribe',{audio:'AAAA',filename:'x.ogg'})).status,401);
-    assert.equal((await post('/assistant/transcribe',{audio:'%%%%',filename:'x.ogg'},'synthetic-key')).status,400);
+    assert.equal((await post('/assistant/transcribe',{})).status,410);
     assert.equal((await fetch(base+'/assistant/capabilities')).status,401);
-    assert.equal((await fetch(base+'/assistant/capabilities',{headers:{'x-admin-key':'synthetic-key'}})).status,200);
+    const caps = await fetch(base+'/assistant/capabilities',{headers:{'x-admin-key':'synthetic-key'}});
+    assert.equal(caps.status,200);
+    assert.equal((await caps.json()).voice,false);
   } finally { await new Promise(resolve => server.close(resolve)); }
 });

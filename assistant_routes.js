@@ -81,7 +81,7 @@ function createAssistantRouter(deps = {}) {
 
   // ── защита админских маршрутов ──
   function requireAdmin(req, res, next) {
-    if (!adminKey) return next(); // ключ не задан → не проверяем (локальная разработка)
+    if (!adminKey) return res.status(503).json({ error: 'Admin access is not configured' });
     const key = req.get('x-admin-key') || req.query.key;
     if (key !== adminKey) return res.status(401).json({ error: 'Доступ запрещён' });
     next();
@@ -91,7 +91,7 @@ function createAssistantRouter(deps = {}) {
 
   router.get('/capabilities', (req, res) => {
     if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Unauthorized' });
-    res.json({ version: '2026-09-22', fast_answers: true, service_categories: true, voice: Boolean(process.env.OPENAI_API_KEY) });
+    res.json({ version: '2026-09-24', fast_answers: true, service_categories: true, voice: false });
   });
 
   // Главная точка: сайт и бот шлют сюда сообщение пользователя.
@@ -174,17 +174,8 @@ function createAssistantRouter(deps = {}) {
 
   // Fail closed: a missing admin key must not expose a paid audio endpoint.
   router.post('/transcribe', async (req, res) => {
-    if (!adminKey || req.get('x-admin-key') !== adminKey) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    try {
-      const text = await require('./transcribe').transcribe(req.body || {});
-      res.json({ text });
-    } catch (e) {
-      const known = ['invalid_audio', 'invalid_identity', 'voice_limit', 'voice_empty'];
-      const error = known.includes(e.message) ? e.message : 'voice_unavailable';
-      res.status(error === 'voice_limit' ? 429 : error === 'voice_unavailable' ? 503 : 400).json({ error });
-    }
+    // Owner cancelled voice. Keep shared OpenAI credentials used for embeddings.
+    res.status(410).json({ error: 'voice_disabled' });
   });
 
   // Только «глаза»: разбирает фото и возвращает структуру. Ни RAG, ни ответа

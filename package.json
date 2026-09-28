@@ -5,6 +5,7 @@
   "private": true,
   "main": "server.js",
   "scripts": {
+    "test": "node --test test_assistant_simple.js test_fast_answers.js test_assistant_routes.js",
     "start": "node server.js",
     "server": "node server.js",
     "web": "node web.js",

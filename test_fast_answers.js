@@ -2,7 +2,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
 const faq = require('./fast_answers');
-const { decode, transcribe } = require('./transcribe');
 
 test('exact aliases and explicit buttons, RU/EN', () => {
   assert.equal(faq.lookup({ text: 'ГДЕ СКАЧАТЬ ХЕНДБУК?' }).id, 'handbook');
@@ -25,6 +24,8 @@ test('core saves both messages, bypasses all models, and respects operator takeo
     };
     if (parent?.filename.endsWith('assistant_core.js') && request === './assistant_store') return {
       getOrCreateConversation: async () => ({ id: 1, operator_mode: operator }),
+      getConversation: async () => ({ id: 1, operator_mode: operator }),
+      hasReviewedKnowledgeSince: async () => false,
       saveMessage: async (...args) => saved.push(args),
     };
     return old.apply(this, arguments);
@@ -41,28 +42,4 @@ test('core saves both messages, bypasses all models, and respects operator takeo
   assert.equal(takeover.reply, null);
   assert.equal(takeover.operator_mode, true);
   assert.deepEqual(saved.map(x => x[1]), ['user']);
-});
-test('audio validation rejects arbitrary files and malformed base64', () => {
-  assert.throws(() => decode({ filename: 'file.exe', audio: 'AAAA' }));
-  assert.throws(() => decode({ filename: 'voice.ogg', audio: '%%%%' }));
-  assert.equal(decode({ filename: 'voice.ogg', audio: Buffer.from('fake ogg').toString('base64') }).mime, 'audio/ogg');
-});
-test('voice preserves Russian, English and Georgian text, without forcing UI language', async () => {
-  const oldKey = process.env.OPENAI_API_KEY;
-  process.env.OPENAI_API_KEY = 'synthetic-test-key';
-  try {
-    for (const [i, text] of ['Где сервис?', 'Where is the shop?', 'სად არის სერვისი?'].entries()) {
-      let called = 0;
-      const request = async (url, options) => {
-        called++;
-        assert.equal(url, 'https://api.openai.com/v1/audio/transcriptions');
-        assert.equal(options.body.has('language'), false);
-        return { ok: true, json: async () => ({ text }) };
-      };
-      const body = { external_id: '123', filename: 'voice.ogg', audio: Buffer.from('fake recording' + i).toString('base64') };
-      assert.equal(await transcribe(body, request), text);
-      assert.equal(await transcribe(body, request), text);
-      assert.equal(called, 1);
-    }
-  } finally { if (oldKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldKey; }
 });
