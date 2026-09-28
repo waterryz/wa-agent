@@ -39,6 +39,7 @@
 <header>
   <div class="t">Alex <small>ИИ-ассистент Prime Fusion · тест</small></div>
   <div>
+    <input type="password" id="adminKey" autocomplete="off" aria-label="Ключ администратора" placeholder="Ключ администратора" />
     <button onclick="reset()">Сброс</button>
     <a href="/exceptions.html" class="panel">⚙ Панель</a>
   </div>
@@ -109,7 +110,7 @@ async function send(){
   try{
     const r = await fetch('/api/chat', {
       method:'POST',
-      headers:{ 'Content-Type':'application/json' },
+      headers:{ 'Content-Type':'application/json', 'x-admin-key':document.getElementById('adminKey').value },
       body: JSON.stringify({ messages: messages.map(m=>({ role:m.role, content:m.content })) }),
     });
     const d = await r.json().catch(()=>({}));

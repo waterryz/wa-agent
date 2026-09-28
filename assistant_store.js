@@ -195,7 +195,18 @@ async function markAdminRead(conversationId) {
   if (error) throw error;
 }
 
+// After staff approve newer broadcast knowledge, fixed factual FAQ templates
+// must no longer bypass the updated knowledge retrieval. Navigation stays fast.
+async function hasReviewedKnowledgeSince(since) {
+  try {
+    const { data, error } = await supabase.from('knowledge_staging').select('id')
+      .eq('status', 'approved').gt('reviewed_at', since).limit(1);
+    return Boolean(error || data?.length);
+  } catch { return true; }
+}
+
 module.exports = {
+  hasReviewedKnowledgeSince,
   supabase,
   getOrCreateConversation,
   saveMessage,

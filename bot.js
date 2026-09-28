@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const { systemBrowserPath } = require('./system_browser');
 const qrcode = require('qrcode-terminal');
 const {
   AGENT_NAME,
@@ -131,7 +132,7 @@ const client = new Client({
   puppeteer: {
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    executablePath: process.env.CHROME_PATH || undefined,
+    executablePath: systemBrowserPath(),
   },
 });
 

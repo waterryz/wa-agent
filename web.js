@@ -19,6 +19,7 @@ const {
 const PORT = parseInt(process.env.PORT || process.env.WEB_PORT || '3000', 10);
 
 const app = express();
+require('./http_auth').protectLegacyRoutes(app, process.env.ADMIN_API_KEY);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -130,3 +131,4 @@ app.post('/api/escalations/:id/resolve', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🌐 Панель исключений: http://localhost:${PORT}`);
 });
+
