@@ -28,7 +28,12 @@ test('Telegram identity and FAQ require server authentication; cancelled voice i
   const app = express();
   app.use('/assistant', create({ adminKey: 'synthetic-key' }));
   app.use('/no-key', create({}));
-  const previewEnv = { ASSISTANT_PREVIEW_MODE: 'true', ASSISTANT_PREVIEW_KEY: 'p'.repeat(32), ADMIN_API_KEY: 'a'.repeat(32) };
+  const previewEnv = {
+    ASSISTANT_PREVIEW_MODE: 'true',
+    ASSISTANT_PREVIEW_KEY: 'p'.repeat(32),
+    ADMIN_API_KEY: 'a'.repeat(32),
+    ASSISTANT_ADMIN_READ_KEY: 'r'.repeat(32),
+  };
   app.use('/preview', createPreviewApp(previewEnv, create));
   const server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
@@ -58,6 +63,12 @@ test('Telegram identity and FAQ require server authentication; cancelled voice i
     const detail = '/preview/assistant/conversations/1';
     assert.equal((await fetch(base + detail)).status, 401);
     assert.equal((await fetch(base + detail, { headers: { 'x-preview-key': previewEnv.ASSISTANT_PREVIEW_KEY } })).status, 401);
+    const readHeaders = { 'x-admin-read-key': previewEnv.ASSISTANT_ADMIN_READ_KEY };
+    const readDetail = await fetch(base + detail, { headers: readHeaders });
+    assert.equal(readDetail.status, 200);
+    assert.deepEqual(await readDetail.json(), { conversation: { id: '1', unread_count: 7 }, messages: [{ id: 1, role: 'user', content: 'synthetic' }] });
+    assert.equal((await fetch(base + '/preview/assistant/conversations/1/poll', { headers: readHeaders })).status, 401);
+    assert.equal((await fetch(base + detail + '/reply', { method: 'POST', headers: { ...readHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ content: 'synthetic' }) })).status, 401);
     for (const method of ['GET', 'HEAD']) {
       const response = await fetch(base + detail, { method, headers: { 'x-admin-key': previewEnv.ADMIN_API_KEY } });
       assert.equal(response.status, 200);

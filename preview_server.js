@@ -13,8 +13,12 @@ function matches(value, expected) {
 function createPreviewApp(env = process.env, routerFactory) {
   const previewKey = env.ASSISTANT_PREVIEW_KEY || '';
   const adminKey = env.ADMIN_API_KEY || '';
+  const adminReadKey = env.ASSISTANT_ADMIN_READ_KEY || '';
   if (env.ASSISTANT_PREVIEW_MODE !== 'true' || previewKey.length < 32 || adminKey.length < 32 || previewKey === adminKey) {
     throw new Error('Preview requires explicit mode and separate server keys of at least 32 characters');
+  }
+  if (adminReadKey && (adminReadKey.length < 32 || adminReadKey === adminKey || adminReadKey === previewKey)) {
+    throw new Error('Preview read key must be distinct from other server keys and at least 32 characters');
   }
   // Reject accidental copies of messaging credentials rather than silently using them.
   for (const name of ['TELEGRAM_BOT_TOKEN', 'TG_KB_BOT_TOKEN', 'BOT_TOKEN', 'RESEND_API_KEY']) {
@@ -25,8 +29,19 @@ function createPreviewApp(env = process.env, routerFactory) {
   app.get('/health', (_req, res) => res.json({ ok: true, mode: 'http-preview', messaging: false }));
   app.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    if (!matches(req.get('x-preview-key'), previewKey) && !matches(req.get('x-admin-key'), adminKey)) {
+    // The site's admin panel may inspect existing records, but this key cannot
+    // reach public chat, billing, a visitor poll, or any mutation route.
+    const adminReadPath = /^\/assistant\/(?:conversations(?:\/[1-9]\d*)?|wa\/(?:exceptions|recent|escalations)|kb-staging)$/;
+    const readOnly = adminReadKey && ['GET', 'HEAD'].includes(req.method) &&
+      adminReadPath.test(req.path) && matches(req.get('x-admin-read-key'), adminReadKey);
+    if (!matches(req.get('x-preview-key'), previewKey) && !matches(req.get('x-admin-key'), adminKey) && !readOnly) {
       return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (readOnly) {
+      // Reuse the existing route-level administrator guard only after the
+      // method and path have passed the narrow preview allowlist above.
+      delete req.headers['x-admin-read-key'];
+      req.headers['x-admin-key'] = adminKey;
     }
     next();
   });
