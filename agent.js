@@ -369,6 +369,7 @@ async function describeServicePhotos(images) {
   const fallback = {
     odometer: '',
     receipt_date: '',
+    service_date: '',
     receipt_total: '',
     vendor: '',
     works: [],
@@ -376,6 +377,12 @@ async function describeServicePhotos(images) {
     plate: '',
     description: '',
     warnings: [],
+    image_evidence: [],
+    line_items: [],
+    tax: '',
+    fees: '',
+    oil_details: {},
+    brake_details: {},
     usage: {},
   };
 
@@ -387,7 +394,8 @@ async function describeServicePhotos(images) {
   const sys = [
     'Ты разбираешь фото сервисного отчёта водителя компании Prime Fusion',
     '(аренда TLC-автомобилей Toyota Sienna в Нью-Йорке).',
-    'На фото обычно: чек (receipt) из автосервиса, панель приборов с пробегом, заполненный чек-лист DMV.',
+    'На фото обычно: чек (receipt) из автосервиса и панель приборов с пробегом.',
+    'Это обычный отчёт о ТО/ремонте: НЕ требуй чек-лист DMV, если фото не относятся к инспекции DMV.',
     'Извлеки данные ТОЛЬКО из того, что реально видно. Ничего не додумывай и не подставляй по смыслу.',
     'Если поля не видно или не разобрать — оставь пустую строку.',
     '',
@@ -395,15 +403,21 @@ async function describeServicePhotos(images) {
     '{',
     '  "odometer": пробег с панели приборов, ТОЛЬКО цифры без единиц ("" если не видно),',
     '  "receipt_date": дата с чека как на чеке ("" если нет),',
+    '  "service_date": дата выполнения работ, если указана на чеке ("" если неясно; не подставляй дату сообщения),',
     '  "receipt_total": итоговая сумма с чека с валютой, например "$89.99" ("" если нет),',
     '  "vendor": название автосервиса с чека ("" если нет),',
     '  "works": массив выполненных работ на русском, например ["замена масла","ротация колёс"] (пустой массив если не видно),',
     '  "oil": марка и вязкость масла, например "Mobil 1 0W20" ("" если не указано),',
     '  "plate": номер автомобиля, если виден ("" если нет),',
+    '  "vin": VIN автомобиля, если виден ("" если нет),',
+    '  "image_evidence": по одному объекту для КАЖДОГО фото в том же порядке: [{"index":1,"kind":"receipt|odometer|other|unclear","readable":true|false}],',
+    '  "line_items": все отдельные строки работ и деталей с чека: [{"description":"...","amount":"число или пустая строка"}],',
+    '  "tax": налог как отдельное число на чеке ("" если не виден),',
+    '  "fees": сумма других доплат как отдельное число на чеке ("" если не видна),',
+    '  "oil_details": {"brand":"","viscosity":"","quantity":""} — только если видны на чеке,',
+    '  "brake_details": {"work":"","axle":"front|rear|"} — только если видны на чеке,',
     '  "description": 1-2 предложения — что именно на фото,',
-    '  "warnings": массив проблем с самими фото на русском. Добавляй пункт, если:',
-    '              на чеке НЕ указана марка/вязкость масла; чек нечитаемый; пробег не видно;',
-    '              чек-лист заполнен не полностью; фото размытое. Пустой массив, если всё в порядке.',
+    '  "warnings": массив только НЕЧИТАЕМЫХ или НЕОДНОЗНАЧНЫХ значений. Не записывай сюда отсутствие DMV-чеклиста или имя клиента ANTON.',
     '}',
   ].join('\n');
 
@@ -421,11 +435,35 @@ async function describeServicePhotos(images) {
     return {
       odometer: str(parsed.odometer).replace(/[^\d]/g, ''),
       receipt_date: str(parsed.receipt_date),
+      service_date: str(parsed.service_date),
       receipt_total: str(parsed.receipt_total),
       vendor: str(parsed.vendor),
       works: arr(parsed.works),
       oil: str(parsed.oil),
       plate: str(parsed.plate),
+      vin: str(parsed.vin),
+      image_evidence: Array.isArray(parsed.image_evidence)
+        ? parsed.image_evidence.filter((x) => x && typeof x === 'object').map((x) => ({
+            index: Number(x.index),
+            kind: ['receipt', 'odometer', 'other', 'unclear'].includes(x.kind) ? x.kind : 'unclear',
+            readable: x.readable === true,
+          })).filter((x, i, all) => Number.isInteger(x.index) && x.index >= 1
+            && x.index <= list.length && all.findIndex((other) => other.index === x.index) === i)
+        : [],
+      line_items: Array.isArray(parsed.line_items)
+        ? parsed.line_items.filter((x) => x && typeof x === 'object').map((x) => ({
+            description: str(x.description), amount: str(x.amount),
+          }))
+        : [],
+      tax: str(parsed.tax),
+      fees: str(parsed.fees),
+      oil_details: parsed.oil_details && typeof parsed.oil_details === 'object' ? {
+        brand: str(parsed.oil_details.brand), viscosity: str(parsed.oil_details.viscosity),
+        quantity: str(parsed.oil_details.quantity),
+      } : {},
+      brake_details: parsed.brake_details && typeof parsed.brake_details === 'object' ? {
+        work: str(parsed.brake_details.work), axle: str(parsed.brake_details.axle).toLowerCase(),
+      } : {},
       description: str(parsed.description),
       warnings: arr(parsed.warnings),
       usage,
