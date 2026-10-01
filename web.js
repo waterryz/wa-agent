@@ -6,6 +6,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const store = require('./store');
+const fastAnswers = require('./fast_answers');
 const {
   OWNER_NAME,
   retrieveContext,
@@ -40,6 +41,18 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const lastUser = turns[turns.length - 1].content;
+    // The test chat must exercise the same approved direct answers as WhatsApp.
+    const direct = fastAnswers.lookup({ text: lastUser });
+    if (direct) {
+      return res.json({
+        reply: direct.text,
+        escalated: false,
+        reason: '',
+        facts: 0,
+        examples: 0,
+        usage: { in: 0, out: 0, embed: 0, tokens: 0, usd: 0 },
+      });
+    }
     const { examples, facts, embedTokens } = await retrieveContext(lastUser);
     const firstTurn = !turns.some((m) => m.role === 'assistant');
     const { text: raw, usage } = await generateReply(
