@@ -57,6 +57,12 @@ const ANSWERS = {
     en: 'In the Telegram bot, open “DMV inspection” → “Send photos after DMV”. Send the completed checklist, photos of the front, rear, left and right sides of the car, and the total odometer reading. Make sure they are clear.',
     action: 'dmv',
   },
+  dmv_status_from_report: {
+    aliases: [],
+    ru: 'Бланк и фотографии — внутренний отчёт Prime Fusion, а не подтверждение официальной DMV-инспекции. По этому сообщению я не могу проверить статус вашей машины или подтвердить, можно ли сейчас работать. Сверьте официальный результат и срок инспекции с компанией. Для внутреннего отчёта нужны бланк, четыре стороны автомобиля и фото общего пробега.',
+    en: 'The checklist and photos are an internal Prime Fusion report, not proof that the official DMV inspection has passed. I cannot verify your vehicle’s status or confirm that you may work from this message. Check the official result and deadline with the company. The internal report needs the checklist, four sides of the car, and the total odometer photo.',
+    source: 'Prime Fusion renter workflow: internal photo report is separate from official DMV inspection status',
+  },
   odometer: {
     aliases: ['что такое одометр', 'где найти пробег', 'какой пробег фотографировать', 'what is an odometer', 'where is the odometer'],
     ru: 'Одометр показывает общий пробег автомобиля на приборной панели. Сфотографируйте экран так, чтобы все цифры были видны. Нужен общий пробег, а не Trip A или Trip B.',
@@ -143,10 +149,17 @@ function filterHistoryIntent(value) {
   return filter && service && rule && !otherIssue;
 }
 
+function unverifiedDmvWorkIntent(value) {
+  const inspection = /\bdmv\b|дмв|инспекц|inspection/iu.test(value);
+  const evidence = /бланк|фото|снимк|отч[её]т|чек-?лист|документ|\b(?:photos?|reports?|checklists?|forms?)\b/iu.test(value);
+  const workOrStatus = /можно|могу|разреш|ехать|ездить|работ|официальн|пройд|зачт|подтвержд|статус|\b(?:can|may|drive|work|operate|passed|approved|complete|confirmed|status)\b/iu.test(value);
+  return inspection && evidence && workOrStatus;
+}
+
 function lookup({ text = '', topic = null, language = null, hasPhoto = false }) {
   if (hasPhoto) return null;
   const normalized = normalize(text);
-  const id = topic && !normalized ? topic : INDEX.get(normalized) || (filterHistoryIntent(normalized) ? 'service_filters' : null);
+  const id = topic && !normalized ? topic : INDEX.get(normalized) || (filterHistoryIntent(normalized) ? 'service_filters' : null) || (unverifiedDmvWorkIntent(normalized) ? 'dmv_status_from_report' : null);
   if (!id || !ANSWERS[id]) return null;
   const lang = /[\u10a0-\u10ff\u1c90-\u1cbf]/u.test(text) ? 'ka' : /[а-яё]/i.test(text) ? 'ru' : normalized ? 'en' : language;
   const answer = ANSWERS[id];
