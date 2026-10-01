@@ -35,6 +35,19 @@ test('personal, compound, ambiguous and photo questions bypass templates', () =>
   assert.equal(faq.lookup({ text: 'где хендбук', hasPhoto: true }), null);
   assert.equal(faq.lookup({ topic: 'payment', text: 'I paid yesterday', language: 'en' }), null);
 });
+test('mechanic uncertainty about oil-change count receives the approved filter rule', () => {
+  const question = 'Механик не знает, какая замена масла по счёту. Что делать с воздушным и салонным фильтрами?';
+  const reply = faq.lookup({ text: question });
+  assert.equal(reply.id, 'service_filters');
+  assert.match(reply.text, /каждой второй замене масла/);
+  assert.match(reply.text, /историю обслуживания/);
+  assert.equal(faq.lookup({ text: 'Mechanic does not know which oil change this is. What about the filters?' }).id, 'service_filters');
+  for (const text of [
+    'Я оплатил фильтры после замены масла. Верните деньги.',
+    'После замены масла машина заглохла и фильтр дымит. Что делать?',
+    'Механик предлагает дорогой ремонт фильтра. Сколько я должен платить?',
+  ]) assert.equal(faq.lookup({ text }), null);
+});
 test('core saves both messages, bypasses all models, and respects operator takeover', async () => {
   let operator = false, calls = [], saved = [];
   const old = Module._load;
