@@ -151,10 +151,21 @@ const INDEX = new Map();
 for (const [id, answer] of Object.entries(ANSWERS)) {
   for (const alias of answer.aliases) INDEX.set(normalize(alias), id);
 }
+
+// Keep the approved second-oil-change rule stable when the driver or mechanic
+// does not know the count. Personal disputes and unrelated faults still use AI.
+function filterHistoryIntent(value) {
+  const filter = /фильтр|\bfilters?\b/iu.test(value);
+  const service = /масл|замен|\b(?:oil|change|service|mechanic)\b|механик/iu.test(value);
+  const rule = /не зна|не помн|какая|какой|сколько|по сч[её]ту|истори|втор|кажд|когда|как часто|по состоянию|\b(?:unknown|know|which|second|every|history|condition)\b/iu.test(value);
+  const otherIssue = /ремонт|полом|заглох|не завод|дым|авари|страхов|штраф|депозит|долг|оплат|стоим|цена|dmv|инспек|заяв|\b(?:repair|stalled|breakdown|accident|crash|claim|ticket|deposit|paid|payment|price|charge|refund|inspection)\b/iu.test(value);
+  return filter && service && rule && !otherIssue;
+}
+
 function lookup({ text = '', topic = null, language = null, hasPhoto = false }) {
   if (hasPhoto) return null;
   const normalized = normalize(text);
-  const id = topic && !normalized ? topic : INDEX.get(normalized) || INDEX.get(withoutCourtesy(text));
+  const id = topic && !normalized ? topic : INDEX.get(normalized) || INDEX.get(withoutCourtesy(text)) || (filterHistoryIntent(normalized) ? 'service_filters' : null);
   if (!id || !ANSWERS[id]) return null;
   const lang = /[\u10a0-\u10ff\u1c90-\u1cbf]/u.test(text) ? 'ka' : /[а-яё]/i.test(text) ? 'ru' : normalized ? 'en' : language;
   const answer = ANSWERS[id];
