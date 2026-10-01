@@ -46,7 +46,7 @@ const ANSWERS = {
     action: 'dmv',
   },
   inspection_photos: {
-    aliases: ['какие фото нужны после инспекции', 'какие фото нужны для дмв', 'what photos are needed after inspection'],
+    aliases: ['какие фото нужны после инспекции', 'какие фото нужны для дмв', 'какие фотографии нужно отправить после dmv-инспекции', 'что отправить после dmv', 'what photos are needed after inspection', 'what should i send after dmv'],
     ru: 'В Telegram-боте откройте «DMV-инспекция» → «Отправить фото после DMV». Нужны заполненный бланк проверки, фото машины спереди, сзади, слева и справа, а также общий пробег. Фото должны быть чёткими.',
     en: 'In the Telegram bot, open “DMV inspection” → “Send photos after DMV”. Send the completed checklist, photos of the front, rear, left and right sides of the car, and the total odometer reading. Make sure they are clear.',
     action: 'dmv',

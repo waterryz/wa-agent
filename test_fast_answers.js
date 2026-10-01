@@ -21,6 +21,7 @@ test('current service and DMV answers keep the complete instructions', () => {
   assert.match(interval, /6 000 миль/);
   assert.match(interval, /не позднее 7 000 миль/);
   const dmv = faq.lookup({ text: 'какие фото нужны для дмв' }).text;
+  assert.equal(faq.lookup({ text: 'Какие фотографии нужно отправить после DMV-инспекции?' }).id, 'inspection_photos');
   for (const item of ['бланк', 'спереди', 'сзади', 'слева', 'справа', 'пробег']) assert.ok(dmv.includes(item), item);
   const service = faq.lookup({ text: 'как отправить чек' }).text;
   assert.match(service, /«Сервис» → «Отправить фото после сервиса»/);
