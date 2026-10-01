@@ -38,4 +38,5 @@ test('deposit answers cannot promise a next-day refund or declare the live site 
   assert.match(prompt, /сумма зависит от конкретного подписанного договора/);
   assert.match(prompt, /Не объявляй документы действующего сайта устаревшими без проверки/);
   assert.match(prompt, /Для планового ТО в K, R & S Auto Service запись не нужна/);
+  assert.match(prompt, /Если клиент спрашивает, когда вернут депозит: назови общий срок/);
 });
