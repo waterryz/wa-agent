@@ -15,6 +15,13 @@ test('personal, compound, ambiguous and photo questions bypass templates', () =>
   assert.equal(faq.lookup({ text: 'где хендбук', hasPhoto: true }), null);
   assert.equal(faq.lookup({ topic: 'payment', text: 'I paid yesterday', language: 'en' }), null);
 });
+test('current service and DMV templates give the complete rule', () => {
+  assert.match(faq.lookup({ text: 'когда менять фильтры' }).text, /каждой второй замене масла/);
+  assert.match(faq.lookup({ text: 'когда ехать на то' }).text, /6 000.*7 000/);
+  assert.match(faq.lookup({ text: 'какие фото нужны для дмв' }).text, /спереди, сзади, слева и справа/);
+  assert.match(faq.lookup({ text: 'может ли брат водить арендованную машину' }).text, /Не передавайте/);
+  assert.equal(faq.lookup({ text: 'когда менять фильтры и я оплатил ремонт' }), null);
+});
 test('core saves both messages, bypasses all models, and respects operator takeover', async () => {
   let operator = false, calls = [], saved = [];
   const old = Module._load;
