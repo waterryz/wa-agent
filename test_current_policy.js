@@ -32,3 +32,10 @@ test('unknown oil-change count requires checking the service history', () => {
   assert.match(prompt, /Если номер замены неизвестен, сверить историю с компанией/);
   assert.match(prompt, /не считай слова механика подтверждением/);
 });
+
+test('deposit answers cannot promise a next-day refund or declare the live site stale', () => {
+  const prompt = buildSystemPrompt({ examples: [], facts: [], firstTurn: false });
+  assert.match(prompt, /сумма зависит от конкретного подписанного договора/);
+  assert.match(prompt, /Не объявляй документы действующего сайта устаревшими без проверки/);
+  assert.match(prompt, /Для планового ТО в K, R & S Auto Service запись не нужна/);
+});
