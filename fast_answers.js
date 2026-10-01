@@ -28,10 +28,16 @@ const ANSWERS = {
     action: 'service',
   },
   service_filters: {
-    aliases: ['когда менять фильтры', 'как часто менять фильтры', 'фильтры при замене масла', 'when to change the filters', 'how often should the filters be changed'],
+    aliases: ['когда менять фильтры', 'как часто менять фильтры', 'когда менять воздушный и салонный фильтры', 'фильтры при замене масла', 'when to change the filters', 'how often should the filters be changed'],
     ru: 'Воздушный фильтр двигателя и салонный фильтр меняют при каждой второй замене масла. Проверяйте их и историю обслуживания на каждом ТО: механик может не знать, какая замена масла по счёту. Если история неясна, уточните в компании; не считайте текущую замену «второй» наугад.',
     en: 'Replace the engine air filter and cabin filter at every second oil change. Check the filters and service history at every visit, since the mechanic may not know which oil change this is. If the history is unclear, confirm it with the company.',
     source: 'Prime Fusion mobile handbook 2.2 (2026-10-01), page 58; owner clarification (2026-10-01)',
+  },
+  service_interval: {
+    aliases: ['когда ехать на то', 'когда менять масло', 'через сколько миль делать то', 'when should i get an oil change', 'when is service due'],
+    ru: 'Планируйте ТО примерно через 6 000 миль после предыдущего обслуживания и пройдите его не позднее 7 000 миль. Если пробег с прошлого ТО неизвестен, проверьте историю обслуживания или уточните его в компании.',
+    en: 'Plan service about 6,000 miles after the previous visit and complete it no later than 7,000 miles. If you do not know the mileage since the last service, check the service history or ask the company.',
+    source: 'Prime Fusion mobile handbook 2.2 (2026-10-01), page 57',
   },
   dmv_form: {
     aliases: ['где взять бланк дмв', 'где взять бланк dmv', 'кому отдать бланк', 'where do i get the dmv form', 'where to get dmv form'],

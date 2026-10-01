@@ -16,6 +16,10 @@ test('current service and DMV answers keep the complete instructions', () => {
   assert.match(filters.text, /каждой второй замене масла/);
   assert.match(filters.text, /каждом ТО/);
   assert.match(faq.lookup({ text: 'how often should the filters be changed' }).text, /every second oil change/);
+  assert.equal(faq.lookup({ text: 'Когда менять воздушный и салонный фильтры?' }).id, 'service_filters');
+  const interval = faq.lookup({ text: 'когда менять масло' }).text;
+  assert.match(interval, /6 000 миль/);
+  assert.match(interval, /не позднее 7 000 миль/);
   const dmv = faq.lookup({ text: 'какие фото нужны для дмв' }).text;
   for (const item of ['бланк', 'спереди', 'сзади', 'слева', 'справа', 'пробег']) assert.ok(dmv.includes(item), item);
   const service = faq.lookup({ text: 'как отправить чек' }).text;
