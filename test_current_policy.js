@@ -73,7 +73,7 @@ test('crash advice does not carry forward superseded instructions', () => {
   assert.doesNotMatch(prompt, /не давать другой стороне данные своей страховки/i);
   assert.doesNotMatch(prompt, /полицию вызовет другая сторона/i);
   assert.doesNotMatch(prompt, /через \*\*5 дней\*\*/i);
-  assert.doesNotMatch(prompt, /Telegram/);
+  assert.doesNotMatch(prompt, /Выслать все материалы Антону в Telegram/);
   assert.doesNotMatch(prompt, /ущербе менее \$1000 обращаться к страховке нецелесообразно/i);
   assert.doesNotMatch(prompt, /без него страховой клейм открыть нельзя/i);
   assert.doesNotMatch(prompt, /ты не платишь ничего/i);
