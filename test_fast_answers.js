@@ -98,3 +98,16 @@ test('voice preserves Russian, English and Georgian text, without forcing UI lan
     }
   } finally { if (oldKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldKey; }
 });
+
+
+test('internal DMV photo report never confirms official inspection or work eligibility', () => {
+  const ru = faq.lookup({ text: 'Я отправил заполненный бланк и фото после DMV. Инспекция официально пройдена, можно ехать работать?' });
+  assert.equal(ru.id, 'dmv_status_from_report');
+  assert.match(ru.text, /не могу проверить статус вашей машины/);
+  assert.match(ru.text, /не подтверждение официальной DMV-инспекции/);
+  const en = faq.lookup({ text: 'I sent my DMV checklist and photos. Can I drive and work now?' });
+  assert.equal(en.id, 'dmv_status_from_report');
+  assert.match(en.text, /cannot verify your vehicle/);
+  assert.equal(faq.lookup({ text: 'Какие фото нужны для дмв' }).id, 'inspection_photos');
+  assert.equal(faq.lookup({ text: 'Я прислал фото ресита ТО. Можно работать?' }), null);
+});
