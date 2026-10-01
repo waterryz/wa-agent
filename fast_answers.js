@@ -39,6 +39,12 @@ const ANSWERS = {
     en: 'Plan service about 6,000 miles after the previous visit and complete it no later than 7,000 miles. If you do not know the mileage since the last service, check the service history or ask the company.',
     source: 'Prime Fusion mobile handbook 2.2 (2026-10-01), page 57',
   },
+  no_vehicle_transfer: {
+    aliases: ['может ли брат водить арендованную машину', 'могу ли я передать машину другому водителю', 'can my brother drive the rental car for one day if he has a tlc license', 'can someone else drive my rental car'],
+    ru: 'Нет. Не передавайте арендованный автомобиль другому человеку, даже родственнику с TLC-лицензией и даже на один день. Если у вас особая ситуация, сначала напишите компании; до ответа машину никому не передавайте.',
+    en: 'No. Do not let anyone else drive the rental car, even a relative with a TLC license and even for one day. If you have a special situation, contact the company first; do not hand over the car while waiting for a reply.',
+    source: 'Owner-confirmed renter rule: no transfer of the vehicle',
+  },
   dmv_form: {
     aliases: ['где взять бланк дмв', 'где взять бланк dmv', 'кому отдать бланк', 'where do i get the dmv form', 'where to get dmv form'],
     ru: 'Распечатайте бланк проверки и передайте его Алексу или Гарри в сервисе. Если нужны расходники компании, получите их заранее по договорённости. После DMV отправьте в Telegram-боте заполненный бланк, четыре стороны машины и общий пробег.',

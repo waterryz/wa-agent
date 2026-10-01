@@ -20,6 +20,9 @@ test('current service and DMV answers keep the complete instructions', () => {
   const interval = faq.lookup({ text: 'когда менять масло' }).text;
   assert.match(interval, /6 000 миль/);
   assert.match(interval, /не позднее 7 000 миль/);
+  const transfer = faq.lookup({ text: 'Can my brother drive the rental car for one day if he has a TLC license?' }).text;
+  assert.match(transfer, /Do not let anyone else drive/);
+  assert.doesNotMatch(transfer, /second driver|approved driver/i);
   const dmv = faq.lookup({ text: 'какие фото нужны для дмв' }).text;
   assert.equal(faq.lookup({ text: 'Какие фотографии нужно отправить после DMV-инспекции?' }).id, 'inspection_photos');
   for (const item of ['бланк', 'спереди', 'сзади', 'слева', 'справа', 'пробег']) assert.ok(dmv.includes(item), item);
