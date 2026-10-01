@@ -47,5 +47,6 @@ test('repair payment disputes are escalated without promises about billing or re
   assert.match(prompt, /не подтверждай зачёт/);
   assert.match(prompt, /Не утверждай без проверки, что конкретный счёт сервис выставит напрямую владельцу/);
   assert.match(prompt, /Не обещай, когда и кто свяжется/);
+  assert.match(prompt, /Не могу подтвердить время ответа; вопрос передан сотруднику/);
   assert.match(prompt, /\[\[ESCALATE\]\]/);
 });
