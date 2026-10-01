@@ -22,6 +22,19 @@ test('current service and DMV templates give the complete rule', () => {
   assert.match(faq.lookup({ text: 'может ли брат водить арендованную машину' }).text, /Не передавайте/);
   assert.equal(faq.lookup({ text: 'когда менять фильтры и я оплатил ремонт' }), null);
 });
+test('uncertain oil-change count keeps the approved filter rule', () => {
+  const question = 'Механик не знает, какая замена масла по счёту. Что делать с воздушным и салонным фильтрами?';
+  const reply = faq.lookup({ text: question });
+  assert.equal(reply.id, 'service_filters');
+  assert.match(reply.text, /каждой второй замене масла/);
+  assert.match(reply.text, /историю/);
+  assert.equal(faq.lookup({ text: 'Mechanic does not know which oil change this is. What about the filters?' }).id, 'service_filters');
+  for (const text of [
+    'Я оплатил фильтры после замены масла. Верните деньги.',
+    'После замены масла машина заглохла и фильтр дымит. Что делать?',
+    'Механик предлагает дорогой ремонт фильтра. Сколько я должен платить?',
+  ]) assert.equal(faq.lookup({ text }), null);
+});
 test('core saves both messages, bypasses all models, and respects operator takeover', async () => {
   let operator = false, calls = [], saved = [];
   const old = Module._load;
