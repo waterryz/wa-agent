@@ -51,7 +51,7 @@
     <textarea id="t" rows="1" placeholder="Напиши как клиент…"></textarea>
     <button class="send" id="send" onclick="send()">▶</button>
   </div>
-  <div class="hint">Тест без WhatsApp. Alex использует ту же базу знаний, стиль и эскалацию.</div>
+  <div class="hint">Тестовый чат. Alex использует те же правила, что и бот Prime Fusion.</div>
 </footer>
 
 <script>
@@ -65,7 +65,7 @@ function scrollDown(){ chat.scrollTop = chat.scrollHeight; }
 
 function render(){
   if(!messages.length){
-    chat.innerHTML = '<div class="empty">Напиши сообщение как клиент —<br/>Alex ответит так же, как в WhatsApp.</div>';
+    chat.innerHTML = '<div class="empty">Напиши сообщение как клиент —<br/>Alex ответит по правилам Prime Fusion.</div>';
     return;
   }
   chat.innerHTML = messages.map(m=>{

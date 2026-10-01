@@ -84,3 +84,13 @@ test('crash advice does not carry forward superseded instructions', () => {
   assert.match(prompt, /не решай по предполагаемой сумме ущерба/);
   assert.match(prompt, /не утверждай, что он прочитал его/);
 });
+
+
+test('first reply uses respectful Russian and no channel or attachment status is invented', () => {
+  const prompt = buildSystemPrompt({ examples: [], facts: [], firstTurn: true });
+  assert.match(prompt, /Здравствуйте, я Alex, ИИ-помощник Prime Fusion/);
+  assert.doesNotMatch(prompt, /Ты общаешься с клиентами в WhatsApp|текущий WhatsApp-чат/);
+  assert.match(prompt, /не хватает фото или бланка/);
+  assert.match(prompt, /если тебе не передан подтверждённый статус отчёта/);
+  assert.match(prompt, /после 6 800 миль остаётся ровно 200/);
+});
