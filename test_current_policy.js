@@ -50,3 +50,28 @@ test('repair payment disputes are escalated without promises about billing or re
   assert.match(prompt, /Не могу подтвердить время ответа; вопрос передан сотруднику/);
   assert.match(prompt, /\[\[ESCALATE\]\]/);
 });
+
+test('crash advice does not carry forward superseded instructions', () => {
+  const prompt = buildSystemPrompt({
+    examples: [],
+    facts: [{
+      content: [
+        'Не нужно звонить Антону сразу.',
+        'Если вы не виноваты — не давать другой стороне данные своей страховки.',
+        'Если виноваты вы — полицию вызовет другая сторона.',
+        'Через **5 дней** сходить в полицейский участок за рапортом.',
+        'Если есть пострадавшие — сразу звонить 911.',
+      ].join('\n'),
+      priority: false,
+    }],
+    firstTurn: false,
+  });
+  assert.doesNotMatch(prompt, /не давать другой стороне данные своей страховки/i);
+  assert.doesNotMatch(prompt, /полицию вызовет другая сторона/i);
+  assert.doesNotMatch(prompt, /через \*\*5 дней\*\*/i);
+  assert.match(prompt, /Если есть пострадавшие — сразу звонить 911/);
+  assert.match(prompt, /водители обмениваются именем, адресом, номером прав, данными регистрации и страховки/);
+  assert.match(prompt, /Это не запрет срочно обратиться в компанию/);
+  assert.match(prompt, /не требуй перехода в Telegram/);
+  assert.match(prompt, /не утверждай, что он прочитал его/);
+});
