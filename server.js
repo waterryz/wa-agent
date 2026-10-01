@@ -32,6 +32,7 @@ try {
 const store = require('./store'); // старый слой: seen/blocked/escalations
 const astore = require('./assistant_store'); // новый слой: диалоги/сообщения
 const core = require('./assistant_core'); // общий пайплайн обработки
+const fastAnswers = require('./fast_answers');
 const { createAssistantRouter } = require('./assistant_routes');
 const kbCollector = require('./kb_collector'); // авто-сбор фактов из ТГ-рассылки (инертен без TG_KB_BOT_TOKEN)
 const {
@@ -790,6 +791,22 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const lastUser = turns[turns.length - 1].content;
+    // Match the approved direct-answer path used by the real WhatsApp core.
+    // Photos and compound requests continue through vision/RAG as before.
+    if (!photo) {
+      const direct = fastAnswers.lookup({ text: lastUser });
+      if (direct) {
+        return res.json({
+          reply: direct.text,
+          escalated: false,
+          reason: '',
+          facts: 0,
+          examples: 0,
+          photo: null,
+          usage: { in: 0, out: 0, embed: 0, tokens: 0, usd: 0 },
+        });
+      }
+    }
     const query = photo ? buildPhotoQuery(photo, caption) : lastUser;
     const { examples, facts, embedTokens } = await retrieveContext(query);
     const firstTurn = !turns.some((m) => m.role === 'assistant');
