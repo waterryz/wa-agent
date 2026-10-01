@@ -41,3 +41,11 @@ test('deposit answers cannot promise a next-day refund or declare the live site 
   assert.match(prompt, /Если клиент спрашивает, когда вернут депозит: назови общий срок/);
   assert.match(prompt, /Не называй упомянутые клиентом \$1 000 стандартной фиксированной суммой для всех/);
 });
+
+test('repair payment disputes are escalated without promises about billing or response time', () => {
+  const prompt = buildSystemPrompt({ examples: [], facts: [], firstTurn: false });
+  assert.match(prompt, /не подтверждай зачёт/);
+  assert.match(prompt, /Не утверждай без проверки, что конкретный счёт сервис выставит напрямую владельцу/);
+  assert.match(prompt, /Не обещай, когда и кто свяжется/);
+  assert.match(prompt, /\[\[ESCALATE\]\]/);
+});
