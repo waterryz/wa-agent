@@ -26,3 +26,9 @@ test('current service policy overrides superseded handbook and chat snippets', (
   assert.match(prompt, /не позднее 7 000 миль/);
   assert.match(prompt, /каждой второй замене масла/);
 });
+
+test('unknown oil-change count requires checking the service history', () => {
+  const prompt = buildSystemPrompt({ examples: [], facts: [], firstTurn: false });
+  assert.match(prompt, /Если номер замены неизвестен, сверить историю с компанией/);
+  assert.match(prompt, /не считай слова механика подтверждением/);
+});
