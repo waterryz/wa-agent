@@ -1,7 +1,7 @@
 // Approved navigation/service answers, versioned independently of model prompts.
 // Exact normalized aliases only: ambiguous, compound and personal requests go to AI.
-const VERSION = '2026-09-22';
-const SOURCE = 'Owner-approved bot proposals and service corrections, 2026-09-22';
+const VERSION = '2026-10-01';
+const SOURCE = 'Prime Fusion mobile handbook 2.2 (2026-10-01) and owner clarification (2026-10-01)';
 const ANSWERS = {
   service_choice: {
     aliases: ['сервис', 'service', 'то'],
@@ -17,26 +17,32 @@ const ANSWERS = {
   },
   handbook: {
     aliases: ['где скачать хендбук', 'скачать хендбук', 'где хендбук', 'download handbook', 'where can i download the handbook'],
-    ru: 'Откройте «Сервис и документы» → «Скачать хендбук». Вы получите оригинальную версию для телефона на выбранном языке.',
-    en: 'Open “Service and documents” → “Download handbook”. You will receive the original mobile edition in your selected language.',
+    ru: 'Хендбук можно открыть на primefusioncars.com в разделе «Документы для ознакомления». В Telegram-боте он также доступен через «Вопросы и помощь».',
+    en: 'Open the handbook at primefusioncars.com under “Documents”. It is also available through “Questions and help” in the Telegram bot.',
     action: 'handbook',
   },
   service_report: {
     aliases: ['как отправить отчет', 'как отправить отчёт о сервисе', 'как отправить чек', 'how to send a report', 'how do i send a service report'],
-    ru: '1. Сфотографируйте чек с датой, номером машины, работами и стоимостью.\n2. Сфотографируйте общий пробег на приборной панели.\n3. Отправьте оба фото здесь или через «Сервис и документы» → «Отчёт о сервисе».',
-    en: '1. Photograph the receipt showing the date, vehicle plate, work and cost.\n2. Photograph the total odometer reading.\n3. Send both photos here or open “Service and documents” → “Service report”.',
+    ru: 'Сфотографируйте весь ресит из сервиса так, чтобы читались дата, машина, работы и стоимость. Добавьте фото общего пробега. Отправьте их в Telegram-боте: «Сервис» → «Отправить фото после сервиса».',
+    en: 'Photograph the full service receipt so the date, vehicle, work and cost are readable. Add a photo of the total odometer reading. In the Telegram bot, open “Service” → “Send photos after service”.',
     action: 'service',
+  },
+  service_filters: {
+    aliases: ['когда менять фильтры', 'как часто менять фильтры', 'фильтры при замене масла', 'when to change the filters', 'how often should the filters be changed'],
+    ru: 'Воздушный фильтр двигателя и салонный фильтр меняют при каждой второй замене масла. Проверяйте их и историю обслуживания на каждом ТО: механик может не знать, какая замена масла по счёту. Если история неясна, уточните в компании; не считайте текущую замену «второй» наугад.',
+    en: 'Replace the engine air filter and cabin filter at every second oil change. Check the filters and service history at every visit, since the mechanic may not know which oil change this is. If the history is unclear, confirm it with the company.',
+    source: 'Prime Fusion mobile handbook 2.2 (2026-10-01), page 58; owner clarification (2026-10-01)',
   },
   dmv_form: {
     aliases: ['где взять бланк дмв', 'где взять бланк dmv', 'кому отдать бланк', 'where do i get the dmv form', 'where to get dmv form'],
-    ru: 'Возьмите бланк инспекции DMV в компании или распечатайте его. Расходники также можно взять в компании.\nВ сервисе передайте бланк лично Гарри или Алексу.\nПосле инспекции пришлите фото заполненного бланка и общего пробега здесь или в отчёте DMV.',
-    en: 'Pick up the DMV inspection form from the company or print it. Supplies are also available from the company.\nAt the service shop, hand the form directly to Harry or Alex.\nAfter inspection, send photos of the completed form and total odometer reading here or in a DMV report.',
+    ru: 'Распечатайте бланк проверки и передайте его Алексу или Гарри в сервисе. Если нужны расходники компании, получите их заранее по договорённости. После DMV отправьте в Telegram-боте заполненный бланк, четыре стороны машины и общий пробег.',
+    en: 'Print the inspection checklist and give it to Alex or Harry at the shop. Arrange to collect any company-provided supplies in advance. After DMV, send the completed checklist, photos of all four sides of the car and the total odometer reading through the Telegram bot.',
     action: 'dmv',
   },
   inspection_photos: {
     aliases: ['какие фото нужны после инспекции', 'какие фото нужны для дмв', 'what photos are needed after inspection'],
-    ru: 'Пришлите фото заполненного бланка инспекции DMV и фото общего пробега. Все цифры должны быть видны.',
-    en: 'Send a photo of the completed DMV inspection form and the total odometer reading. All numbers must be readable.',
+    ru: 'В Telegram-боте откройте «DMV-инспекция» → «Отправить фото после DMV». Нужны заполненный бланк проверки, фото машины спереди, сзади, слева и справа, а также общий пробег. Фото должны быть чёткими.',
+    en: 'In the Telegram bot, open “DMV inspection” → “Send photos after DMV”. Send the completed checklist, photos of the front, rear, left and right sides of the car, and the total odometer reading. Make sure they are clear.',
     action: 'dmv',
   },
   odometer: {

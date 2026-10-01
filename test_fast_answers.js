@@ -11,6 +11,17 @@ test('exact aliases and explicit buttons, RU/EN', () => {
   assert.match(faq.lookup({ text: 'нет убера и лифта' }).text, /Даже без/);
   assert.equal(faq.lookup({ text: 'сервис' }).action, 'service_choice');
 });
+test('current service and DMV answers keep the complete instructions', () => {
+  const filters = faq.lookup({ text: 'когда менять фильтры' });
+  assert.match(filters.text, /каждой второй замене масла/);
+  assert.match(filters.text, /каждом ТО/);
+  assert.match(faq.lookup({ text: 'how often should the filters be changed' }).text, /every second oil change/);
+  const dmv = faq.lookup({ text: 'какие фото нужны для дмв' }).text;
+  for (const item of ['бланк', 'спереди', 'сзади', 'слева', 'справа', 'пробег']) assert.ok(dmv.includes(item), item);
+  const service = faq.lookup({ text: 'как отправить чек' }).text;
+  assert.match(service, /«Сервис» → «Отправить фото после сервиса»/);
+  assert.doesNotMatch(service, /Сервис и документы/);
+});
 test('personal, compound, ambiguous and photo questions bypass templates', () => {
   for (const text of ['я оплатил сервис верните деньги', 'где сервис и почему у меня долг', 'გადახდა', 'I already paid, why do I owe money?']) assert.equal(faq.lookup({ text }), null);
   assert.equal(faq.lookup({ text: 'где хендбук', hasPhoto: true }), null);
