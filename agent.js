@@ -516,11 +516,25 @@ function buildPhotoBlock(photo, caption = '') {
 }
 
 // ── Подсказка для Kimi ───────────────────────────────────────────────
-function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCaption = '' }) {
-  const adminFacts = facts.filter((f) => f.priority);
-  const otherFacts = facts.filter((f) => !f.priority);
+function currentFactText(content) {
+  // Historical brochure, FAQ and broadcast entries still contain the old
+  // "every 7,000 miles" target. Keep the rest of each source, but do not feed
+  // that superseded sentence back to the model as a current company rule.
+  return String(content || '').split(/\r?\n/).filter((line) => {
+    const oldOilInterval = /7[\s,.]?000/.test(line) &&
+      (/(?:масл|oil change)/i.test(line) || /интервал\s*:\s*каждые/i.test(line)) &&
+      /(?:кажд|every|интервал|крайн)/i.test(line) && !/не позднее/i.test(line);
+    const oldFilterRange = /фильтр/i.test(line) && /2\s*[–-]\s*3/.test(line) && /замен/i.test(line);
+    return !oldOilInterval && !oldFilterRange;
+  }).join('\n').trim();
+}
 
-  const factsBlock = facts.length
+function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCaption = '' }) {
+  const cleanFacts = facts.map((f) => ({ ...f, content: currentFactText(f.content) })).filter((f) => f.content);
+  const adminFacts = cleanFacts.filter((f) => f.priority);
+  const otherFacts = cleanFacts.filter((f) => !f.priority);
+
+  const factsBlock = cleanFacts.length
     ? [
         `ФАКТЫ О КОМПАНИИ Prime Fusion (опирайся только на них, не выдумывай):`,
         adminFacts.length
@@ -588,7 +602,11 @@ function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCapt
     `  Клиент маркер не увидит — его обрабатывает система. Без маркера передача не сработает.`,
   ].join('\n');
 
-  return [head, photoBlock, factsBlock, examplesBlock].filter(Boolean).join('\n\n');
+  const currentPolicy = `АКТУАЛЬНЫЙ РЕГЛАМЕНТ PRIME FUSION (подтверждён хендбуком 2.2 и владельцем):\n` +
+    `Планировать ТО примерно через 6 000 миль после предыдущего обслуживания; выполнить не позднее 7 000 миль. ` +
+    `Воздушный фильтр двигателя и салонный фильтр менять при каждой второй замене масла; ` +
+    `проверять их и историю на каждом ТО. После DMV нужны заполненный бланк, четыре стороны машины и общий пробег.`;
+  return [head, photoBlock, factsBlock, examplesBlock, currentPolicy].filter(Boolean).join('\n\n');
 }
 
 // ── Генерация ответа (Kimi) ──────────────────────────────────────────
