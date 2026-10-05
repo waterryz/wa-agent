@@ -94,3 +94,19 @@ test('first reply uses respectful Russian and no channel or attachment status is
   assert.match(prompt, /если тебе не передан подтверждённый статус отчёта/);
   assert.match(prompt, /после 6 800 миль остаётся ровно 200/);
 });
+
+
+test('standard overage policy uses 50 cents for both limits and service without changing individual facts', () => {
+  const prompt=buildSystemPrompt({examples:[],facts:[
+    {content:'Перерасход миль — $0.25 за каждую лишнюю милю.',priority:false},
+    {content:'Each mile above the selected monthly limit costs an additional $0.25.',priority:false},
+    {content:'Индивидуальная ставка по подписанному договору клиента: $0.25 за милю.',priority:true},
+    {content:'Отдельное подтверждённое правило клиента.',priority:true}
+  ],firstTurn:false});
+  assert.match(prompt,/сверх месячного лимита тарифа — \$0\.50 за милю/);
+  assert.match(prompt,/сервисного интервала 7 000 миль — также \$0\.50/);
+  assert.doesNotMatch(prompt,/Перерасход миль — \$0\.25 за каждую лишнюю милю/);
+  assert.doesNotMatch(prompt,/Each mile above the selected monthly limit costs an additional \$0\.25/);
+  assert.match(prompt,/Индивидуальная ставка по подписанному договору клиента: \$0\.25/);
+  assert.match(prompt,/Отдельное подтверждённое правило клиента/);
+});

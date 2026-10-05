@@ -535,7 +535,9 @@ function currentFactText(content) {
 }
 
 function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCaption = '' }) {
-  const cleanFacts = facts.map((f) => ({ ...f, content: currentFactText(f.content) })).filter((f) => f.content);
+  const cleanFacts = facts.map((f) => ({ ...f, content: currentFactText(f.content).split(/\r?\n/).filter(line =>
+    f.priority || !(/\$0\.25/.test(line) && /перерасход|перепробег|лишн.*мил|excess.?mileage|extra.?mile|each mile above|per mile over/i.test(line) && !/индивидуаль|подписан|signed|individually agreed/i.test(line))
+  ).join('\n') })).filter((f) => f.content);
   const adminFacts = cleanFacts.filter((f) => f.priority);
   const otherFacts = cleanFacts.filter((f) => !f.priority);
 
@@ -622,6 +624,7 @@ function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCapt
   ].join('\n');
 
   const currentPolicy = `АКТУАЛЬНЫЙ РЕГЛАМЕНТ PRIME FUSION (подтверждён хендбуком 2.2 и владельцем):\n` +
+    `Решение владельца от 05.10.2026: стандартная плата за пробег сверх месячного лимита тарифа — $0.50 за милю; за превышение сервисного интервала 7 000 миль — также $0.50 за каждую дополнительную милю до обслуживания. Прежняя общая ставка $0.25 за перепробег тарифа отменена. Это текущие стандартные условия; индивидуальный подписанный договор и подтверждённые исключения сохраняют приоритет. Не пересчитывай прежние начисления и не объявляй долг без проверки. ` +
     `Планировать ТО примерно через 6 000 миль после предыдущего обслуживания; выполнить не позднее 7 000 миль. ` +
     `Воздушный фильтр двигателя и салонный фильтр менять при каждой второй замене масла; ` +
     `проверять их и историю на каждом ТО. Если номер замены неизвестен, сверить историю с компанией; не объявлять счёт замен неважным и не предполагать, что механик уже сверил историю. Для планового ТО в K, R & S Auto Service запись не нужна. После DMV нужны заполненный бланк, четыре стороны машины и общий пробег. ` +
