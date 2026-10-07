@@ -110,3 +110,19 @@ test('standard overage policy uses 50 cents for both limits and service without 
   assert.match(prompt,/Индивидуальная ставка по подписанному договору клиента: \$0\.25/);
   assert.match(prompt,/Отдельное подтверждённое правило клиента/);
 });
+
+test('withdrawn direct-contact deduction cannot return from old admin or handbook facts', () => {
+  const prompt = buildSystemPrompt({examples:[], facts:[
+    {content:'Прямой вопрос администрации без попытки найти готовый ответ в ХБ или у ИИ-помощника — −10. Нет подтверждения сообщения за 24 часа — −20.', priority:true},
+    {content:'A direct question to administration without first trying the handbook or AI helper: −10, identifying the specific available source. Travel without approval: −200.', priority:false},
+    {content:'ადმინისტრაციისთვის პირდაპირი კითხვა სახელმძღვანელოში ან AI-ასისტენტთან მზა პასუხის მოძებნის მცდელობის გარეშე — −10, კონკრეტული წყაროს მითითებით. ტარიფის შეცვლა — 200 ქულა.', priority:true},
+    {content:'Пропущен срок DMV-инспекции — −100. Смена тарифа — 200 баллов.', priority:true},
+  ], firstTurn:false});
+  assert.doesNotMatch(prompt, /−10\b/);
+  assert.match(prompt, /бонусные баллы не списываются/);
+  assert.match(prompt, /Прежний пункт о 10 баллах отменён/);
+  assert.match(prompt, /Нет подтверждения сообщения за 24 часа — −20/);
+  assert.match(prompt, /Travel without approval: −200/);
+  assert.match(prompt, /ტარიფის შეცვლა — 200 ქულა/);
+  assert.match(prompt, /DMV-инспекции — −100/);
+});
