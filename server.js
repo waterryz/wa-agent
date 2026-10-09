@@ -606,7 +606,7 @@ client.on('message', async (msg) => {
 // Важно: у контакта может быть id вида @lid (а не телефон @c.us). Поэтому сначала берём
 // настоящий id чата, запомненный из входящего сообщения; если его нет — пробуем определить
 // по номеру через getNumberId, и лишь в крайнем случае клеим @c.us.
-async function sendWhatsApp(number, text) {
+async function sendWhatsAppLegacy(number, text) {
   const raw = String(number || '');
   let chatId = raw.includes('@') ? raw : waChatIds.get(raw.replace(/\D/g, '')) || null;
   if (!chatId) {
@@ -644,6 +644,31 @@ const app = express();
 // Лимит поднят: через /assistant/chat может прилетать фото в base64 с сайта.
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+const { createTwilioWhatsAppAdapter } = require('./twilio_whatsapp_adapter');
+const twilioWa = createTwilioWhatsAppAdapter({
+  enabled: process.env.TWILIO_WA_ENABLED === '1', // default 0: disabled
+  stateDir: process.env.TWILIO_WA_STATE_DIR,       // must exist, chmod 700, on a persistent volume
+  accountSid: process.env.TWILIO_ACCOUNT_SID,
+  authToken: process.env.TWILIO_AUTH_TOKEN,
+  senderNumber: process.env.TWILIO_WA_SENDER,      // digits only, e.g. +15550001111
+  ownerNumber: process.env.TWILIO_WA_OWNER,        // digits only, single pilot recipient
+  publicInboundUrl: process.env.TWILIO_WA_INBOUND_URL, // EXACT Twilio console webhook URL (query string included)
+  publicStatusUrl: process.env.TWILIO_WA_STATUS_URL,   // EXACT Twilio console status-callback URL
+  core,
+  onEscalation: ({ external_id, name, question, reason }) => store.addEscalation(external_id, name, question, reason),
+  dailyCap: Number(process.env.TWILIO_WA_DAILY_CAP || 50),
+});
+app.use(twilioWa.router);
+twilioWa.start().then((r) => { if (!r.started) console.error('[twilio-wa] not started:', r.reason); });
+process.on('SIGTERM', () => twilioWa.stop().then(() => process.exit(0)));
+
+async function sendWhatsApp(number, text) {
+  if (twilioWa.isTwilioExternalId(number)) {
+    return twilioWa.sendOperatorReply(number, text); // throws on disabled/stopped/opt-out/expired-window/cap-exceeded/non-owner
+  }
+  return sendWhatsAppLegacy(number, text); // legacy path untouched; assistant_routes unchanged
+}
 
 // Общее ядро ИИ-ассистента: /assistant/chat, /assistant/conversations и т.д.
 app.use(
