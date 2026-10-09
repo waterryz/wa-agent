@@ -3,6 +3,7 @@
 require('dotenv').config();
 const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
+const { buildChannelContext } = require('./channel_context');
 
 // ── Конфиг ───────────────────────────────────────────────────────────
 // Числа из env читаем только через это: мусор в переменной (пустая строка, "abc",
@@ -540,7 +541,7 @@ function currentFactText(content) {
   }).join('\n').trim();
 }
 
-function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCaption = '' }) {
+function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCaption = '', channel = null }) {
   const cleanFacts = facts.map((f) => ({ ...f, content: currentFactText(f.content).split(/\r?\n/).filter(line =>
     f.priority || !(/\$0\.25/.test(line) && /перерасход|перепробег|лишн.*мил|excess.?mileage|extra.?mile|each mile above|per mile over/i.test(line) && !/индивидуаль|подписан|signed|individually agreed/i.test(line))
   ).join('\n') })).filter((f) => f.content);
@@ -638,7 +639,8 @@ function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCapt
     `Если клиент спрашивает, когда вернут депозит: назови общий срок — остаток в течение 30 дней после возврата автомобиля и урегулирования долгов. Точную сумму и возврат на следующий день конкретному арендатору не подтверждать без проверки договора и удержаний; не объявлять сайт устаревшим без доказательств. Не называй упомянутые клиентом $1 000 стандартной фиксированной суммой для всех. ` +
     `Не обещать запись ТО, фильтров, пробега или оплаты в карточку по сообщению; отчёт о ТО направлять в Telegram-бот с реситом и одометром, а статус не подтверждать без проверки. ` +
     `Решение владельца от 07.10.2026: за прямое обращение к владельцу или администрации, в том числе не по теме и без предварительного обращения к ИИ/хендбуку, бонусные баллы не списываются. Прежний пункт о 10 баллах отменён, даже если он остался в старом источнике или admin-факте. Остальные основания списания сохраняются.`;
-  return [head, photoBlock, factsBlock, examplesBlock, currentPolicy].filter(Boolean).join('\n\n');
+  const channelContext = buildChannelContext(channel);
+  return [head, photoBlock, factsBlock, examplesBlock, currentPolicy, channelContext].filter(Boolean).join('\n\n');
 }
 
 // ── Генерация ответа (Kimi) ──────────────────────────────────────────
