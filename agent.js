@@ -643,6 +643,13 @@ function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCapt
   return [head, photoBlock, factsBlock, examplesBlock, currentPolicy, channelContext].filter(Boolean).join('\n\n');
 }
 
+// Bounded, tool-free owner CRM summaries. No RAG, vision, retries or channel actions.
+async function generateCrmReview(systemPrompt, text) {
+ const res=await kimi.chat.completions.create({model:KIMI_MODEL,thinking:{type:'disabled'},max_tokens:512,messages:[{role:'system',content:systemPrompt},{role:'user',content:text}]},{timeout:20000});
+ const reply=(res.choices[0]?.message?.content||'').trim();if(!reply)throw Error('empty review');
+ return {text:reply,model:KIMI_MODEL,usage:{input_tokens:res.usage?.prompt_tokens||0,output_tokens:res.usage?.completion_tokens||0}};
+}
+
 // ── Генерация ответа (Kimi) ──────────────────────────────────────────
 async function generateReply(systemPrompt, history) {
   const messages = [{ role: 'system', content: systemPrompt }, ...history];
@@ -725,6 +732,7 @@ module.exports = {
   photoHistoryText,
   buildSystemPrompt,
   generateReply,
+  generateCrmReview,
   parseEscalation,
   costOf,
 };

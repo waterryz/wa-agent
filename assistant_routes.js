@@ -78,6 +78,7 @@ function createAssistantRouter(deps = {}) {
   // что у роутера свой лимит. Строка ниже — на случай монтирования роутера в другое
   // приложение без глобального парсера.
   router.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
+  require('./crm_review').registerCrmReview(router,{adminKey,generate: (...args)=>agent.generateCrmReview(...args)});
   require('./renter_help').registerRenterHelp(router, {adminKey, generateReply: (...args) => agent.generateReply(...args)});
 
   // ── защита админских маршрутов ──
@@ -92,7 +93,7 @@ function createAssistantRouter(deps = {}) {
 
   router.get('/capabilities', (req, res) => {
     if (!adminKey || req.get('x-admin-key') !== adminKey) return res.status(401).json({ error: 'Unauthorized' });
-    res.json({ version: '2026-09-22', fast_answers: true, service_categories: true, voice: Boolean(process.env.OPENAI_API_KEY), renter_help: 'self-crm-v1' });
+    res.json({ version: '2026-09-22', fast_answers: true, service_categories: true, voice: Boolean(process.env.OPENAI_API_KEY), renter_help: 'self-crm-v1',crm_review:'owner-readonly-v1' });
   });
 
   // Главная точка: сайт и бот шлют сюда сообщение пользователя.
