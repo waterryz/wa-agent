@@ -28,7 +28,7 @@ function createKnowledgeIndex({db,embedBatch,pack,model,approvedDigest}) {
    // Deterministic primary-key claim prevents two instances creating embeddings.
    // A previous unfinished claim is UNKNOWN: never repeat its paid request.
    const claim=await db.from('knowledge').insert({id:BASE_ID,source:jobSource,content:JSON.stringify({status:'embedding_request_pending',digest,model,topics:entries.length}),embedding:null});
-   if(claim.error){cached=await load();if(cached){status.state='ready';status.count=cached.length;return;}fail('index_claim_exists_or_unknown_no_retry');}
+   if(claim.error){cached=await load();if(cached){status.state='ready';status.count=cached.length;return;}const code=String(claim.error.code||'unknown').replace(/[^a-zA-Z0-9_]/g,'');fail('index_claim_rejected_'+code);}
    status.state='embedding';
    const result=await embedBatch(entries.map(e=>e.content));
    if(result.model!==model||!Array.isArray(result.data)||result.data.length!==entries.length)fail('embedding_response_invalid');
