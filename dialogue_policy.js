@@ -26,3 +26,12 @@ function mileageAnswer(text,language='ru'){
 }
 function playful(text){return String(text).length<350&&!/(?:сломал|авари|травм|срочно|болит|пожар|не завод|скрыт.*инструк|чуж.*данн|пароль)/i.test(text)&&/(?:марсиан|воображаем|вампир|самооценк|ведр.*обещан|аренд.*половин|половин.*машин|зарабатыва.*сам|сама зарабатывает|ручн.*клад|накрою.*одометр|одометр.*полотен|по запах|прошивк|залить.*кофе|кофе.*гибрид|объеду Землю|назову машин|похуде|испачкал дождь|до конца моей жизни|29 февраля|аренд.*улыбк|улыбк.*сдача|задним ходом.*мили)/i.test(text);}
 module.exports.mileageAnswer=mileageAnswer;module.exports.playful=playful;
+function playfulFast(text,language='ru'){
+ if(language!=='ru'||!playful(text))return null;
+ let answer=null;
+ if(/марсиан/i.test(text)&&/(?:плат|аренд|недел)/i.test(text))answer='Пока работаем по земному календарю. Межпланетный тариф ещё не завезли.';
+ if(/рамп/i.test(text)&&/самооценк/i.test(text))answer='Самооценку рампа не поднимает. Но за удачную шутку могу мысленно дать пять.';
+ if(/по запах/i.test(text)&&/(?:машин|робот|пёс|пес)/i.test(text))answer='Нюх у меня цифровой — свободные машины по запаху пока не нахожу. Их наличие нужно уточнять у компании.';
+ return answer?{id:'playful_safe',text:answer,source:'Owner-approved restrained fictional humor',version:'2026-11-01.3',action:null}:null;
+}
+module.exports.playfulFast=playfulFast;

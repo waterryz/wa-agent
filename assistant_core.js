@@ -166,7 +166,7 @@ async function processMessage({
   // Оператор забрал чат на себя → ИИ не отвечает.
   if (conv.operator_mode) return emptyResult({ operator_mode: true });
 
-  const fast = (!hasPhoto && !faqTopic ? require('./dialogue_policy').mileageAnswer(text,language||'ru') : null) || fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
+  const fast = (!hasPhoto && !faqTopic ? (require('./dialogue_policy').mileageAnswer(text,language||'ru') || require('./dialogue_policy').playfulFast(text,language||'ru')) : null) || fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
   if (fast) {
     await astore.saveMessage(conv.id, 'assistant', fast.text, {
       source: fast.source, version: fast.version, topic: fast.id, fast_answer: true,

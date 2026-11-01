@@ -1,6 +1,6 @@
 'use strict';
 const {createHmac,randomBytes}=require('node:crypto'),{isIP}=require('node:net');
-const VERSION='2026-11-01.2';
+const VERSION='2026-11-01.3';
 const normal=s=>String(s||'').normalize('NFKC').toLowerCase().replace(/[.!?,…]+$/g,'').replace(/\s+/g,' ').trim();
 const closing=/^(?:stop|стоп|не продолжай(?: этот разговор)?|спасибо(?:,? вопрос реш[её]н)?|вопрос реш[её]н|до свидания|пока|thanks|thank you|bye|goodbye|მადლობა|ნახვამდის)$/i;
 const phrases={ru:{closed:'Понял. До связи.',paused:'Разговор временно приостановлен из-за повторяющихся сообщений. Попробуйте через 15 минут.',busy:'Слишком много запросов. Подождите минуту.',repeat:'На этот вопрос уже ответил. Если нужно уточнение, напишите, что осталось непонятно.'},en:{closed:'Understood. Take care.',paused:'This conversation is paused for repeated messages. Please try again in 15 minutes.',busy:'Too many requests. Please wait a minute.',repeat:'I have answered that question. Please say what needs clarification.'},ka:{closed:'გასაგებია. ნახვამდის.',paused:'განმეორებითი შეტყობინებების გამო საუბარი დროებით შეჩერებულია. სცადეთ 15 წუთში.',busy:'ძალიან ბევრი მოთხოვნაა. გთხოვთ, მოიცადოთ ერთი წუთი.',repeat:'ამ კითხვას უკვე ვუპასუხე. დაწერეთ, რისი დაზუსტება გჭირდებათ.'}};
