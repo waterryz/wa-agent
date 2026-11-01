@@ -27,7 +27,7 @@ function createKnowledgeIndex({db,embedBatch,pack,model,approvedDigest}) {
    if(pack.version!=='2026-10-31.3'||digest!==approvedDigest)fail('index_build_not_authorized');
    // Deterministic primary-key claim prevents two instances creating embeddings.
    // A previous unfinished claim is UNKNOWN: never repeat its paid request.
-   const claim=await db.from('knowledge').insert({id:BASE_ID,source:jobSource,content:JSON.stringify({status:'embedding_request_pending',digest,model,topics:entries.length}),embedding:null});
+   const claim=await db.rpc('barkai_insert_reviewed_index_20261031',{p_rows:[{id:BASE_ID,source:jobSource,content:JSON.stringify({status:'embedding_request_pending',digest,model,topics:entries.length}),embedding:null}]});
    if(claim.error){cached=await load();if(cached){status.state='ready';status.count=cached.length;return;}const code=String(claim.error.code||'unknown').replace(/[^a-zA-Z0-9_]/g,'');fail('index_claim_rejected_'+code);}
    status.state='embedding';
    const result=await embedBatch(entries.map(e=>e.content));
@@ -37,7 +37,7 @@ function createKnowledgeIndex({db,embedBatch,pack,model,approvedDigest}) {
    validate(records);
    status.state='saving';
    // One atomic PostgREST batch. Read back after any outcome; never retry insert.
-   try{await db.from('knowledge').insert(records);}catch(_){}
+   try{await db.rpc('barkai_insert_reviewed_index_20261031',{p_rows:records});}catch(_){}
    cached=await load();if(!cached)fail('index_write_unknown_no_retry');
    status.state='ready';status.count=cached.length;status.build_tokens=result.usage?.total_tokens||0;
    try{await db.from('knowledge').update({content:JSON.stringify({status:'ready',digest,model,topics:cached.length,tokens:status.build_tokens})}).eq('id',BASE_ID).eq('source',jobSource);}catch(_){}
