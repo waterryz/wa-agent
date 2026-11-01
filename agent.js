@@ -163,7 +163,7 @@ async function fetchAdminFacts(limit = ADMIN_FACTS_LIMIT) {
 async function retrieveContext(text) {
   const began = performance.now();
   const timings = {};
-  const timed = async (name, fn) => { const t = performance.now(); try { return await fn(); } finally { timings[name] = Math.round(performance.now() - t); } };
+  const timed = async (name, fn) => { const t = performance.now(); try { return await fn(); } catch (e) { if (name === 'embedding_ms') timings.embedding_error_status = Number.isInteger(e.status) ? e.status : 0; throw e; } finally { timings[name] = Math.round(performance.now() - t); } };
   let examples = [];
   let vectorFacts = [];
   let embedTokens = 0;
