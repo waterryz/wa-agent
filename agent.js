@@ -85,6 +85,8 @@ function requireEnv(name) {
 const kimi = new OpenAI({ apiKey: process.env.MOONSHOT_API_KEY, baseURL: KIMI_BASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+const knowledgeIndex = require('./knowledge_index').createKnowledgeIndex({db:supabase,pack:require('./knowledge_current.json'),model:EMBED_MODEL,approvedDigest:'1dec04536b62673c42fbd34d0d3ca85a477cdea24404733deff1f57903314a50',embedBatch:input=>openai.embeddings.create({model:EMBED_MODEL,input},{maxRetries:0,timeout:60000})});
+
 
 // ── Эмбеддинг ────────────────────────────────────────────────────────
 async function embed(text) {
@@ -162,75 +164,16 @@ async function fetchAdminFacts(limit = ADMIN_FACTS_LIMIT) {
 
 // ── RAG: факты (knowledge) + стиль (conversations) одним эмбеддингом ──
 async function retrieveContext(text) {
-  const began = performance.now();
-  const timings = {};
-  const timed = async (name, fn) => { const t = performance.now(); try { return await fn(); } catch (e) { if (name === 'embedding_ms') timings.embedding_error_status = Number.isInteger(e.status) ? e.status : 0; throw e; } finally { timings[name] = Math.round(performance.now() - t); } };
-  let examples = [];
-  let vectorFacts = [];
-  let embedTokens = 0;
-
-  // admin — независимо от вектора: запрос стартует ДО общего try и ждётся ПОСЛЕ,
-  // чтобы (а) сбой эмбеддинга не убивал приоритетные факты, (б) не платить лишним
-  // round-trip'ом к Supabase. fetchAdminFacts никогда не бросает — unhandled rejection
-  // невозможен.
-  const adminPromise = timed('admin_ms', () => fetchAdminFacts());
-
-  const query = (text || '').trim();
-  if (!query) {
-    // Пустой запрос: embed('') отвергается OpenAI, а translateForRetrieval('')
-    // ушёл бы лишним вызовом в Kimi. Отдаём только admin-факты.
-    const only = await adminPromise;
-    return {
-      examples: [],
-      facts: only.map((f) => ({ content: f.content, priority: true })),
-      embedTokens: 0,
-      timings: { ...timings, retrieval_ms: Math.round(performance.now() - began) },
-    };
-  }
-
-  try {
-    // Иноязычный запрос переводим на русский, чтобы находить русские факты/примеры.
-    const queryForEmbed = hasCyrillic(query) ? query : await timed('translation_ms', () => translateForRetrieval(query));
-    const { embedding, tokens } = await timed('embedding_ms', () => embed(queryForEmbed));
-    embedTokens = tokens;
-    const vectorStarted = performance.now();
-    const [conv, know] = await Promise.all([
-      supabase.rpc('match_conversations', {
-        query_embedding: embedding,
-        match_threshold: STYLE_MIN_SIM,
-        match_count: STYLE_TOP_K,
-      }),
-      supabase.rpc('match_knowledge', {
-        query_embedding: embedding,
-        match_threshold: KNOW_MIN_SIM,
-        match_count: KNOW_TOP_K,
-      }),
-    ]);
-    timings.vector_ms = Math.round(performance.now() - vectorStarted);
-    if (conv.error) console.error('⚠️  match_conversations:', conv.error.message);
-    else examples = conv.data || [];
-    if (know.error) console.error('⚠️  match_knowledge:', know.error.message);
-    else vectorFacts = know.data || [];
-  } catch (e) {
-    console.error('⚠️  Ошибка RAG:', e.message);
-  }
-
-  const adminFacts = await adminPromise;
-
-  // Приоритет admin: сначала admin-факты (priority: true), затем векторные факты
-  // без дублей по содержимому и без повторного admin (если RPC его всё же вернул).
-  // Примечание: фильтр по f.source работает, только если SQL-функция match_knowledge
-  // возвращает колонку source; если нет — дубли всё равно снимает adminSet.
-  const adminSet = new Set(adminFacts.map((f) => (f.content || '').trim()));
-  const facts = [
-    ...adminFacts.map((f) => ({ content: f.content, priority: true })),
-    ...vectorFacts
-      .filter((f) => f.source !== 'admin')
-      .filter((f) => !adminSet.has((f.content || '').trim()))
-      .map((f) => ({ content: f.content, priority: false })),
-  ];
-
-  return { examples, facts, embedTokens, timings: { ...timings, retrieval_ms: Math.round(performance.now() - began) } };
+ const began=performance.now(),timings={};let embedTokens=0,facts=[];
+ const timed=async(name,fn)=>{const t=performance.now();try{return await fn();}finally{timings[name]=Math.round(performance.now()-t);}};
+ const query=(text||'').trim();
+ if(query){try{
+  await knowledgeIndex.initialize();
+  const q=hasCyrillic(query)?query:await timed('translation_ms',()=>translateForRetrieval(query));
+  const result=await timed('embedding_ms',()=>embed(q));embedTokens=result.tokens;
+  facts=await timed('vector_ms',()=>knowledgeIndex.search(result.embedding,{limit:KNOW_TOP_K,threshold:KNOW_MIN_SIM}));
+ }catch(e){console.error('BarkAI current knowledge retrieval unavailable:',e.code||'index_or_query_unavailable');}}
+ return {examples:[],facts,embedTokens,timings:{...timings,retrieval_ms:Math.round(performance.now()-began)}};
 }
 
 // ── Общий vision-вызов ───────────────────────────────────────────────
@@ -696,6 +639,8 @@ function parseEscalation(reply) {
 }
 
 module.exports = {
+  initializeKnowledgeIndex:()=>knowledgeIndex.initialize(),
+  knowledgeIndexStatus:()=>knowledgeIndex.status(),
   AGENT_NAME,
   OWNER_NAME,
   KIMI_MODEL,

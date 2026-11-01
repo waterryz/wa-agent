@@ -70,6 +70,7 @@ function parseImages(raw) {
  * @param {string}   [deps.adminKey]      секрет для админских эндпоинтов
  */
 function createAssistantRouter(deps = {}) {
+  agent.initializeKnowledgeIndex().catch(e=>console.error('BarkAI index startup:',e.message));
   const { sendTelegram, sendWhatsApp, onEscalation, onBlockedChange, adminKey } = deps;
   const router = express.Router();
   // Тело уже разобрано глобальным express.json() в server.js (лимит JSON_BODY_LIMIT,
@@ -100,6 +101,11 @@ function createAssistantRouter(deps = {}) {
   // Поддерживает фото: images: [{b64, mime}] + необязательный photo_caption.
   router.post('/chat', async (req, res) => {
     res.set('X-BarkAI-Knowledge-Version', require('./knowledge_current').version);
+    const indexStatus=agent.knowledgeIndexStatus();
+    res.set('X-BarkAI-Index-State',indexStatus.state);
+    res.set('X-BarkAI-Index-Count',String(indexStatus.count));
+    res.set('X-BarkAI-Index-Digest',indexStatus.digest);
+    if(indexStatus.error)res.set('X-BarkAI-Index-Error',indexStatus.error);
     try {
       const b = req.body || {};
       const channel = b.channel;
@@ -158,6 +164,7 @@ function createAssistantRouter(deps = {}) {
       }
 
       // Only numeric durations; no prompts, identifiers, keys or retrieved content.
+      if(Number.isInteger(result.facts))res.set('X-BarkAI-Retrieved-Count',String(result.facts));
       if (result.timings) {
         const timing = ['embedding_error_status', 'embedding_ms', 'translation_ms', 'vector_ms', 'admin_ms', 'retrieval_ms', 'generation_ms', 'core_ms']
           .filter((key) => Number.isFinite(result.timings[key]) && result.timings[key] >= 0)

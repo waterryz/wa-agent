@@ -17,6 +17,8 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'agent.js'),'utf8'), {
     if(name==='@supabase/supabase-js')return {createClient:()=>({rpc:blocked,from:blocked})};
     if(name==='./channel_context')return require('./channel_context');
     if(name==='./knowledge_current')return knowledge;
+    if(name==='./knowledge_current.json')return pack;
+    if(name==='./knowledge_index')return require('./knowledge_index');
     throw Error(name);
   }
 });

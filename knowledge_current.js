@@ -2,9 +2,9 @@
 const crypto = require('node:crypto');
 const pack = require('./knowledge_current.json');
 const digest = text => crypto.createHash('sha256').update(String(text || '').replace(/\r\n/g, '\n').trim()).digest('hex');
-const index = new Map(pack.mapping.map(row => [row.hash, row]));
-// Only reviewed content enters model context. The original database and its
-// embeddings remain recoverable; retrieval maps obsolete text to current topics.
+const index = new Map(Object.entries(pack.topics).map(([topic,t]) => [digest(t.text), {topics:[topic]}]));
+// Only current canonical texts enter model context. The old database rows and
+// embeddings are retained for rollback and are never searched by this release.
 // A changed/new row is not silently treated as reviewed merely because its ID matches.
 function projectFacts(rows = []) {
   const selected = new Set(['priority','rates','deposit','liability','term','channels','assistant','points','receipt','drivers','handbook_links','consent','termination','languages','dmv','shops','downtime','due','equipment','accident']);
