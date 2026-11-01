@@ -21,13 +21,13 @@ test('current service and DMV answers keep the complete instructions', () => {
   assert.match(interval, /6 000 миль/);
   assert.match(interval, /не позднее 7 000 миль/);
   const transfer = faq.lookup({ text: 'Can my brother drive the rental car for one day if he has a TLC license?' }).text;
-  assert.match(transfer, /Do not let anyone else drive/);
-  assert.doesNotMatch(transfer, /second driver|approved driver/i);
+  assert.match(transfer, /before the additional driver is approved/);
+  assert.match(transfer, /second driver/);
   const dmv = faq.lookup({ text: 'какие фото нужны для дмв' }).text;
   assert.equal(faq.lookup({ text: 'Какие фотографии нужно отправить после DMV-инспекции?' }).id, 'inspection_photos');
-  for (const item of ['бланк', 'спереди', 'сзади', 'слева', 'справа', 'пробег']) assert.ok(dmv.includes(item), item);
+  for (const item of ['спереди', 'сзади', 'слева', 'справа', 'одометра']) assert.ok(dmv.includes(item), item);
   const service = faq.lookup({ text: 'как отправить чек' }).text;
-  assert.match(service, /«Сервис» → «Отправить фото после сервиса»/);
+  assert.match(service, /Бланк не нужен/);
   assert.doesNotMatch(service, /Сервис и документы/);
 });
 test('personal, compound, ambiguous and photo questions bypass templates', () => {
@@ -103,11 +103,12 @@ test('voice preserves Russian, English and Georgian text, without forcing UI lan
 test('internal DMV photo report never confirms official inspection or work eligibility', () => {
   const ru = faq.lookup({ text: 'Я отправил заполненный бланк и фото после DMV. Инспекция официально пройдена, можно ехать работать?' });
   assert.equal(ru.id, 'dmv_status_from_report');
-  assert.match(ru.text, /не могу проверить статус вашей машины/);
-  assert.match(ru.text, /не подтверждение официальной DMV-инспекции/);
+  assert.match(ru.text, /не могу по сообщению подтвердить, можно ли сейчас работать/);
+  assert.match(ru.text, /не подтверждает официальный результат DMV-инспекции/);
+  assert.match(ru.text, /Бланк отменён/);
   const en = faq.lookup({ text: 'I sent my DMV checklist and photos. Can I drive and work now?' });
   assert.equal(en.id, 'dmv_status_from_report');
-  assert.match(en.text, /cannot verify your vehicle/);
+  assert.match(en.text, /cannot confirm from a message whether you may work/);
   assert.equal(faq.lookup({ text: 'Какие фото нужны для дмв' }).id, 'inspection_photos');
   assert.equal(faq.lookup({ text: 'Я прислал фото ресита ТО. Можно работать?' }), null);
 });

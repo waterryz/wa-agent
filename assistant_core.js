@@ -206,7 +206,7 @@ async function processMessage({
     photoCaption: caption,
     channel,
   });
-  systemPrompt += '\nUse short, respectful instructions and one next action. Reply in the language of the user’s latest message, including Georgian. Use the term хендбук / handbook, never брошюра. Display US phone numbers without +1. Do not claim a payment, service update or attachment was filed unless the system confirms it. The DMV form can be picked up from the company or printed. Supplies are also available from the company; at the service shop the form must be handed directly to Harry or Alex. If uncertain, ask one short question.';
+  systemPrompt += '\nUse short, respectful instructions and one next action. Reply in the language of the user’s latest message, including Georgian. Use the term хендбук / handbook, never брошюра. Display US phone numbers without +1. Do not claim a payment, service update or attachment was filed unless the system confirms it. The company inspection and service forms have been retired. Do not request them. A receipt and total odometer photo are used for service reports. Receipt of an internal report does not confirm official DMV inspection status. If uncertain, ask one short question.';
   if (context) systemPrompt += '\nCurrent bot step: ' + String(context).slice(0, 300);
   const generationStarted = performance.now();
   const { text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history);

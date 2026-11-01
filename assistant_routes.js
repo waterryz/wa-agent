@@ -99,6 +99,7 @@ function createAssistantRouter(deps = {}) {
   // Главная точка: сайт и бот шлют сюда сообщение пользователя.
   // Поддерживает фото: images: [{b64, mime}] + необязательный photo_caption.
   router.post('/chat', async (req, res) => {
+    res.set('X-BarkAI-Knowledge-Version', require('./knowledge_current').version);
     try {
       const b = req.body || {};
       const channel = b.channel;
