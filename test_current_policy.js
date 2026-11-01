@@ -55,3 +55,10 @@ test('all archived rows accounted for and internal content excluded',()=>{
   for(const row of pack.mapping){for(const topic of row.topics)assert(pack.topics[topic]);if(['archive','internal','verify'].includes(row.decision))assert.equal(row.topics.length,0);}
   assert(!pack.topics.owner_workflow);
 });
+
+test('failed retrieval still supplies weekly payment and READY safety boundaries',()=>{
+  const prompt=build([]);
+  for(const term of ['еженедельно авансом','READY','12-вольтовой','НЕ обязательный минимальный','Ставка $600 не предлагается'])assert(prompt.includes(term),term);
+  assert(!prompt.includes('предложи сделать это здесь без перехода'));
+  assert(prompt.includes('Личному ассистенту Алексу по установленному рабочему каналу'));
+});

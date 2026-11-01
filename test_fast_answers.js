@@ -112,3 +112,11 @@ test('internal DMV photo report never confirms official inspection or work eligi
   assert.equal(faq.lookup({ text: 'Какие фото нужны для дмв' }).id, 'inspection_photos');
   assert.equal(faq.lookup({ text: 'Я прислал фото ресита ТО. Можно работать?' }), null);
 });
+
+test('resolved conversation aliases do not swallow a new issue or override language',()=>{
+  assert.equal(faq.lookup({text:'STOP'}).text,'Understood. I will stop here.');
+  assert.equal(faq.lookup({text:'STOP. Не продолжай этот разговор.'}).text,'Понял. Останавливаю разговор.');
+  assert.equal(faq.lookup({text:'მადლობა, ჩემი კითხვა ამოწურულია'}).text,'არაფრის.');
+  assert.equal(faq.lookup({text:'Спасибо, вопрос решён. Но у меня новая проблема с тормозами'}),null);
+  assert.equal(faq.lookup({text:'STOP',hasPhoto:true}),null);
+});

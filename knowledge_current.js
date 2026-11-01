@@ -7,7 +7,7 @@ const index = new Map(pack.mapping.map(row => [row.hash, row]));
 // embeddings remain recoverable; retrieval maps obsolete text to current topics.
 // A changed/new row is not silently treated as reviewed merely because its ID matches.
 function projectFacts(rows = []) {
-  const selected = new Set(['priority','rates','deposit','liability','term','channels','assistant','points','receipt','drivers','handbook_links','consent','termination','languages','dmv','shops','downtime']);
+  const selected = new Set(['priority','rates','deposit','liability','term','channels','assistant','points','receipt','drivers','handbook_links','consent','termination','languages','dmv','shops','downtime','due','equipment','accident']);
   let unknown = 0;
   for (const row of rows) {
     const reviewed = index.get(digest(row.content));

@@ -1,8 +1,10 @@
 // Approved navigation/service answers, versioned independently of model prompts.
 // Exact normalized aliases only: ambiguous, compound and personal requests go to AI.
-const VERSION = '2026-10-31.1';
+const VERSION = '2026-10-31.2';
 const SOURCE = 'Reviewed owner rules and Lease 1.4 EN';
 const ANSWERS = {
+  stop_conversation: { aliases: ["stop", "stop. не продолжай этот разговор", "не продолжай этот разговор"], ru: "Понял. Останавливаю разговор.", en: "Understood. I will stop here." },
+  resolved_thanks: {aliases:["спасибо, вопрос решён", "спасибо, вопрос решен", "thanks, my question is resolved", "მადლობა, ჩემი კითხვა ამოწურულია"], ru:"Пожалуйста.", en:"You’re welcome.", ka:"არაფრის."},
   "service_choice": {
     "aliases": [
       "сервис",
