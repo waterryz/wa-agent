@@ -35,6 +35,7 @@ function mileageContext(text){
 }
 module.exports={POLICY,mileageContext};
 function mileageAnswer(text,language='ru'){
+ const verified=verifiedRuleAnswer(text,language);if(verified)return verified;
  if(language!=='ru'||!/(?:тариф|вариант).*(?:подойд|выбра|посовет|лучше)|(?:подойд|выбра|посовет|лучше).*тариф/i.test(text)||/(?:долг|оплатил|верните|платёж|платеж|списал|договоре)/i.test(text))return null;
  const c=mileageContext(text);if(!c)return null;const j=JSON.parse(c.slice(c.indexOf('{'),c.lastIndexOf('}')+1));
  const choose=a=>a.find(x=>x.monthly_limit==='unlimited'||x.monthly_limit>=j.monthly_miles);
@@ -54,3 +55,26 @@ function playfulFast(text,language='ru'){
  return answer?{id:'playful_safe',text:answer,source:'Owner-approved restrained fictional humor',version:'2026-11-01.3',action:null}:null;
 }
 module.exports.playfulFast=playfulFast;
+
+function verifiedRuleAnswer(text,language='ru') {
+ if(language!=='ru')return null;
+ const t=String(text||'');
+ // Only informational questions; never decide a real ledger or perform actions.
+ if(t.length>2000||/(?:мне списали|у меня списали|обнули|спиши|начисли мне|SYSTEM:)/i.test(t))return null;
+ let answer=null;
+ const exam=/(?:тест|зач[её]т)/i.test(t);
+ if(/(?:GPS|трекер)/i.test(t)&&/(?:отключ|снять|сним|отсоедин)/i.test(t)&&!/(?:как отключ|как снять)/i.test(t))
+   answer='Нет, отключать GPS-трекер нельзя. Само отключение не доказывает выезд за разрешённую территорию; переносить на него баллы за другое нарушение нельзя.';
+ else if(exam&&/(?:повторн|пересда|завершил)/i.test(t)&&/(?:результат|ошиб|открыть|идеальн)/i.test(t))
+   answer='Повторный тест нужно завершить. Безошибочный результат не обязателен для зачёта бонусов; за него дают дополнительные 50 баллов один раз на шестимесячный зачёт. Просто открыть тест недостаточно. Это правило программы New Style с 1 января 2027 года.';
+ else if(/балл/i.test(t)&&!/(?:доллар|сколько.*оплат)/i.test(t)&&/(?:парковоч|парковк)/i.test(t)&&/(?:суммар|итого|всего|общая|сколько)/i.test(t)&&/(?:нов|перв|уведом|письм)/i.test(t))
+   answer='Общее списание — 25 баллов: 20 за новое уведомление и 5 за парковочный штраф. Это правило программы New Style с 1 января 2027 года; повторная копия того же штрафа нового списания не создаёт.';
+ else if(/балл/i.test(t)&&!/(?:доллар|сколько.*оплат)/i.test(t)&&/(?:MTA|камер[аы].*автобус|автобус.*камер)/i.test(t)&&/(?:суммар|итого|всего|общая|общее|сколько)/i.test(t)&&/(?:нов|перв|уведом|письм)/i.test(t))
+   answer='Общее списание — 70 баллов: 20 за новое уведомление и 50 за штраф с камеры автобуса MTA. Это правило программы New Style с 1 января 2027 года; повторная копия того же штрафа нового списания не создаёт.';
+ else if(/(?:другому водител|знаком|второму водител)/i.test(t)&&/(?:без разреш|без соглас|без допуска)/i.test(t)&&/(?:можно|могу|может ли)/i.test(t)&&!/(?:ДТП|ущерб|авари)/i.test(t))
+   answer='Нет. Для передачи управления нужен предварительный допуск компании и, когда это требуется, страховщика. Одной TLC-лицензии или опыта недостаточно. Отдельное исключение — необходимое действие для спасения жизни.';
+ else if(/Алекс/i.test(t)&&/(?:страхов|компенсац)/i.test(t)&&/(?:сам|согласу|урегули|договар)/i.test(t))
+   answer='Алекс — личный ИИ-ассистент, а не страховщик или уполномоченный представитель по урегулированию. Он может помогать в пределах подключённых инструментов, но обещать согласование компенсации со страховщиком нельзя. Решение и подтверждённое действие остаются за компанией.';
+ return answer?{id:'verified_operational_rule',text:answer,source:'Reviewed Lease 1.4 and bonus programme; no individual ledger action',version:'2026-11-01.4',action:null}:null;
+}
+module.exports.verifiedRuleAnswer=verifiedRuleAnswer;
