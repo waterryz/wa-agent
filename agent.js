@@ -559,7 +559,7 @@ function buildSystemPrompt({ examples, facts, firstTurn, photo = null, photoCapt
   ].join('\n');
 
   const currentPolicy = 'Рабочие отчёты направлять Алексу по установленному рабочему каналу, а не сюда в анонимный чат. Не обещать передачу, проверку PDF или запись без доступного инструмента и результата. Не задавать завершающий вопрос после достаточного ответа. Никаких реальных списаний, начислений, регистрации или доставки по одному текстовому ответу. TEST не реальные деньги. Учитывай последнее подтверждённое решение владельца и не расширяй доступы.';
-  const channelContext = buildChannelContext(channel);
+  const channelContext = buildChannelContext(channel)+(channel==='web'?'\nСАЙТ: передачи живому оператору в этом чате нет. Не ставь маркер [[ESCALATE]], не обещай передать/уточнить/связаться и не говори что человек подключится. Для вопроса сотруднику дай только раздел контактов https://primefusioncars.com/#contacts и естественно закончи ответ.': '');
   return [head, photoBlock, factsBlock, examplesBlock, currentPolicy, channelContext].filter(Boolean).join('\n\n');
 }
 
@@ -572,7 +572,9 @@ async function generateCrmReview(systemPrompt, text) {
 
 // ── Генерация ответа (Kimi) ──────────────────────────────────────────
 async function generateReply(systemPrompt, history) {
-  const messages = [{ role: 'system', content: systemPrompt }, ...history];
+  const policy=require('./dialogue_policy');
+  const latest=[...history].reverse().find(m=>m.role==='user');
+  const messages = [{ role: 'system', content: systemPrompt+'\n'+policy.POLICY+policy.mileageContext(latest?.content||'') }, ...history];
   const started = Date.now();
   const res = await kimi.chat.completions.create(
     {

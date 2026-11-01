@@ -100,6 +100,7 @@ function createAssistantRouter(deps = {}) {
   // Главная точка: сайт и бот шлют сюда сообщение пользователя.
   // Поддерживает фото: images: [{b64, mime}] + необязательный photo_caption.
   router.post('/chat', async (req, res) => {
+    res.set('X-BarkAI-Dialogue-Version', require('./dialogue_guard').VERSION);
     res.set('X-BarkAI-Knowledge-Version', require('./knowledge_current').version);
     const indexStatus=agent.knowledgeIndexStatus();
     res.set('X-BarkAI-Index-State',indexStatus.state);
@@ -131,6 +132,7 @@ function createAssistantRouter(deps = {}) {
         b.photo_caption !== undefined ? b.photo_caption : b.photoCaption;
 
       const result = await core.processMessage({
+        clientIp: channel==='web' ? require('./dialogue_guard').clientIP(req) : null,
         channel,
         external_id,
         message,
@@ -171,6 +173,7 @@ function createAssistantRouter(deps = {}) {
           .map((key) => key + ';dur=' + Math.round(result.timings[key]));
         if (timing.length) res.set('Server-Timing', timing.join(', '));
       }
+      if(result.retry_after)res.set('Retry-After',String(result.retry_after));
       res.json({
         conversation_id: result.conversation_id,
         reply: result.reply,

@@ -1,0 +1,19 @@
+const test=require('node:test'),assert=require('node:assert/strict');
+const{createDialogueGuard,clientIP}=require('./dialogue_guard');const{mileageContext}=require('./dialogue_policy');
+test('STOP is free and new substantive question reopens',()=>{const g=createDialogueGuard();assert.equal(g.begin({id:'a',text:'СТОП!'}).reason,'conversation_closed');const a=g.begin({id:'a',text:'Где сервис?'});assert(a.allowed);a.finish(true);assert.equal(g.begin({id:'a',text:'Спасибо, вопрос решён'}).reason,'conversation_closed');});
+test('duplicates pause only own session and expire',()=>{let t=0;const g=createDialogueGuard({now:()=>t});g.begin({id:'a',ip:'192.0.2.1',text:'q'}).finish(true);assert.equal(g.begin({id:'a',ip:'192.0.2.1',text:'q'}).reason,'duplicate_answered');assert.equal(g.begin({id:'a',ip:'192.0.2.1',text:'q'}).reason,'session_pause');assert(g.begin({id:'b',ip:'192.0.2.1',text:'q'}).allowed);t=900001;assert(g.begin({id:'a',text:'new'}).allowed);});
+test('failed generation releases in-flight without marking answered',()=>{const g=createDialogueGuard();const a=g.begin({id:'a',text:'q'});assert.equal(g.begin({id:'a',text:'q'}).reason,'session_inflight');a.finish(false);a.finish(false);assert(g.begin({id:'a',text:'q'}).allowed);});
+test('attachments bypass closure and duplicate text',()=>{const g=createDialogueGuard();const a=g.begin({id:'a',text:'STOP',hasAttachment:true});assert(a.allowed);a.finish(true);assert(g.begin({id:'a',text:'STOP',hasAttachment:true}).allowed);});
+test('IP budget spans sessions, expires, validates header',()=>{let t=0;const g=createDialogueGuard({now:()=>t});for(let i=0;i<60;i++){const a=g.begin({id:'s'+i,ip:'192.0.2.2',text:'q'});assert(a.allowed);a.finish(true);}assert.equal(g.begin({id:'new',ip:'192.0.2.2',text:'q'}).reason,'ip_rate_limit');t=60001;assert(g.begin({id:'new',ip:'192.0.2.2',text:'q'}).allowed);assert.equal(clientIP({get:()=> 'invalid, 1.1.1.1'},true),null);});
+test('mileage math correctly handles 3200 and rejects other numbers',()=>{const c=mileageContext('Я проезжаю примерно 3 200 миль в месяц');const j=JSON.parse(c.slice(c.indexOf('{'),c.lastIndexOf('}')+1));assert.equal(j.from_2027_01_01[1].excess_usd,0);assert.equal(j.from_2027_01_01[0].excess_usd,350);assert.equal(j.through_2026[1].excess_usd,0);assert.equal(mileageContext('депозит 3200'),'');});
+test('web core guard bypasses embeddings, generation and vision; operator takeover wins',async()=>{
+ const Module=require('node:module'),old=Module._load;let operator=false,calls=0;
+ Module._load=function(request,parent){if(parent?.filename.endsWith('assistant_core.js')&&request==='./agent')return{OWNER_NAME:'Owner',costOf:()=>({}),retrieveContext:()=>{calls++;throw Error('paid forbidden');},describeImages:()=>{calls++;throw Error('paid forbidden');}};
+ if(parent?.filename.endsWith('assistant_core.js')&&request==='./assistant_store')return{getOrCreateConversation:async()=>({id:987,operator_mode:operator}),saveMessage:async()=>{}};return old.apply(this,arguments);};
+ let core;try{delete require.cache[require.resolve('./assistant_core')];core=require('./assistant_core');}finally{Module._load=old;}
+ const p={channel:'web',external_id:'synthetic-guard',message:'где хендбук'};
+ assert((await core.processMessage(p)).fast_answer);
+ assert.equal((await core.processMessage(p)).action,'duplicate_answered');
+ assert.equal((await core.processMessage(p)).action,'session_pause');
+ operator=true;assert.equal((await core.processMessage({...p,images:[{b64:'synthetic',mime:'image/jpeg'}]})).operator_mode,true);assert.equal(calls,0);
+});

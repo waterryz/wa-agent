@@ -15,6 +15,7 @@
 const agent = require('./agent');
 const astore = require('./assistant_store');
 const fastAnswers = require('./fast_answers');
+const dialogueGuard=require('./dialogue_guard').createDialogueGuard();
 
 const { OWNER_NAME } = agent;
 
@@ -85,6 +86,7 @@ async function processMessage({
   faqTopic = null,
   language = null,
   context = null,
+  clientIp = null,
 }) {
   const started = performance.now();
   const text = (message || '').trim();
@@ -105,6 +107,14 @@ async function processMessage({
     driver_id,
   });
 
+  const gate=channel==='web'&&!conv.operator_mode ? dialogueGuard.begin({id:String(conv.id),ip:clientIp,text,language:language||'ru',hasAttachment:hasPhoto||Boolean(faqTopic)}) : null;
+  if(gate&&!gate.allowed){
+    await astore.saveMessage(conv.id,'user',text||'[Attachment]');
+    await astore.saveMessage(conv.id,'assistant',gate.reply,{fast_answer:true,guard:gate.reason});
+    return {conversation_id:conv.id,reply:gate.reply,fast_answer:true,action:gate.reason,retry_after:gate.retryAfter,escalate:false,operator_mode:false,facts:0,examples:0,photo:null,user_text:text,cost:agent.costOf({}),timings:{core_ms:Math.round(performance.now()-started)}};
+  }
+  let guardAnswered=false;
+  try {
   // ── Шаг «глаза»: превращаем картинку в текст.
   // В режиме оператора vision НЕ вызываем: отвечает человек, он и так видит фото
   // в мессенджере, а платить за разбор каждого кадра при спаме незачем.
@@ -161,6 +171,7 @@ async function processMessage({
     await astore.saveMessage(conv.id, 'assistant', fast.text, {
       source: fast.source, version: fast.version, topic: fast.id, fast_answer: true,
     });
+    guardAnswered=true;
     return emptyResult({ reply: fast.text, fast_answer: true, action: fast.action });
   }
 
@@ -213,6 +224,7 @@ async function processMessage({
   const generationMs = Math.round(performance.now() - generationStarted);
   let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
 
+  if(channel==='web'){escalate=false;reason='';if(!replyText)replyText='Не удалось подготовить ответ. Контакты компании: https://primefusioncars.com/#contacts';}
   // Модель может вернуть пустоту: у kimi-k2.6 reasoning тратит те же выходные
   // токены, и на сложном вопросе лимит кончается ДО текста ответа. Раньше клиент
   // в этом случае не получал вообще ничего. Теперь — честная передача человеку.
@@ -269,6 +281,7 @@ async function processMessage({
     await astore.setStatus(conv.id, 'escalated');
   }
 
+  guardAnswered=Boolean(finalText);
   return {
     conversation_id: conv.id,
     reply: finalText || null,
@@ -284,6 +297,7 @@ async function processMessage({
     user_text: userText,
     cost,
   };
+  } finally {gate?.finish?.(guardAnswered);}
 }
 
 module.exports = { processMessage };
