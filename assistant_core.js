@@ -86,6 +86,7 @@ async function processMessage({
   language = null,
   context = null,
 }) {
+  const started = performance.now();
   const text = (message || '').trim();
   const imageList = Array.isArray(images) ? images.filter((i) => i && i.b64 && i.mime) : [];
   const hasPhoto = Boolean(photo) || imageList.length > 0;
@@ -195,7 +196,7 @@ async function processMessage({
     (photoData ? agent.buildPhotoQuery(photoData, caption) : '') ||
     history[history.length - 1].content;
 
-  const { examples, facts, embedTokens } = await agent.retrieveContext(query);
+  const { examples, facts, embedTokens, timings: retrievalTimings } = await agent.retrieveContext(query);
   const firstTurn = !history.some((m) => m.role === 'assistant');
   let systemPrompt = agent.buildSystemPrompt({
     examples,
@@ -207,7 +208,9 @@ async function processMessage({
   });
   systemPrompt += '\nUse short, respectful instructions and one next action. Reply in the language of the user’s latest message, including Georgian. Use the term хендбук / handbook, never брошюра. Display US phone numbers without +1. Do not claim a payment, service update or attachment was filed unless the system confirms it. The DMV form can be picked up from the company or printed. Supplies are also available from the company; at the service shop the form must be handed directly to Harry or Alex. If uncertain, ask one short question.';
   if (context) systemPrompt += '\nCurrent bot step: ' + String(context).slice(0, 300);
+  const generationStarted = performance.now();
   const { text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history);
+  const generationMs = Math.round(performance.now() - generationStarted);
   let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
 
   // Модель может вернуть пустоту: у kimi-k2.6 reasoning тратит те же выходные
@@ -269,6 +272,7 @@ async function processMessage({
   return {
     conversation_id: conv.id,
     reply: finalText || null,
+    timings: { ...retrievalTimings, generation_ms: generationMs, core_ms: Math.round(performance.now() - started) },
     escalate,
     reason: reason || '',
     operator_mode: false,
