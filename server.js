@@ -242,8 +242,8 @@ const MEDIA_NOTICE = {
     'Too many photos at once — I couldn\'t review them all. Please resend the key ones a bit later ' +
     'or describe the situation in text.',
   document:
-    `Получил ваш документ и передаю ${OWNER_NAME} — он посмотрит и свяжется с вами.\n\n` +
-    `Got your document, I'm forwarding it to ${OWNER_NAME} — he'll review it and get back to you.`,
+    `Получил ваш документ и передаю менеджменту Prime Fusion.\n\n` +
+    `Got your document. I am forwarding it to Prime Fusion management.`,
 };
 
 // ── История чата → сообщения для модели (user/assistant) ───────────────────
@@ -841,7 +841,7 @@ app.post('/api/chat', async (req, res) => {
     );
     const { text, escalate, reason } = parseEscalation(raw);
     const reply =
-      text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '…');
+      text || (escalate ? `Передал ваш вопрос менеджменту Prime Fusion.` : '…');
 
     if (escalate) await store.addEscalation(null, 'Веб-чат (тест)', lastUser, reason);
 

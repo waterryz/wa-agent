@@ -61,7 +61,7 @@ app.post('/api/chat', async (req, res) => {
     );
     const { text, escalate, reason } = parseEscalation(raw);
     const reply =
-      text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '…');
+      text || (escalate ? `Передал ваш вопрос менеджменту Prime Fusion.` : '…');
 
     if (escalate) await store.addEscalation(null, 'Веб-чат', lastUser, reason);
 
