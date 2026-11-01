@@ -574,7 +574,8 @@ async function generateCrmReview(systemPrompt, text) {
 async function generateReply(systemPrompt, history) {
   const policy=require('./dialogue_policy');
   const latest=[...history].reverse().find(m=>m.role==='user');
-  const messages = [{ role: 'system', content: systemPrompt+'\n'+policy.POLICY+policy.mileageContext(latest?.content||'') }, ...history];
+  const tonePrompt=policy.playful(latest?.content||'') ? 'Ты Баркай, вымышленный робопёс компании Prime Fusion. Это безобидная шутка. Ответь на языке собеседника одной или двумя короткими фразами с лёгким сухим юмором. Не представляйся. Не добавляй тарифы, договор, научные цифры, угрозы или вопрос в конце. Не обещай реальных действий. '+policy.POLICY : systemPrompt+'\n'+policy.POLICY+policy.mileageContext(latest?.content||'');
+  const messages = [{ role: 'system', content: tonePrompt }, ...history];
   const started = Date.now();
   const res = await kimi.chat.completions.create(
     {

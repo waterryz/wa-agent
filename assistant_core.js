@@ -166,7 +166,7 @@ async function processMessage({
   // Оператор забрал чат на себя → ИИ не отвечает.
   if (conv.operator_mode) return emptyResult({ operator_mode: true });
 
-  const fast = fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
+  const fast = (!hasPhoto && !faqTopic ? require('./dialogue_policy').mileageAnswer(text,language||'ru') : null) || fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
   if (fast) {
     await astore.saveMessage(conv.id, 'assistant', fast.text, {
       source: fast.source, version: fast.version, topic: fast.id, fast_answer: true,
@@ -224,7 +224,7 @@ async function processMessage({
   const generationMs = Math.round(performance.now() - generationStarted);
   let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
 
-  if(channel==='web'){escalate=false;reason='';if(!replyText)replyText='Не удалось подготовить ответ. Контакты компании: https://primefusioncars.com/#contacts';}
+  if(channel==='web'){if(escalate&&!/primefusioncars.com\/#contacts/.test(replyText))replyText=(replyText||'Вопрос требует проверки сотрудником компании.')+'\nКонтакты компании: https://primefusioncars.com/#contacts';escalate=false;reason='';if(!replyText)replyText='Не удалось подготовить ответ. Контакты компании: https://primefusioncars.com/#contacts';}
   // Модель может вернуть пустоту: у kimi-k2.6 reasoning тратит те же выходные
   // токены, и на сложном вопросе лимит кончается ДО текста ответа. Раньше клиент
   // в этом случае не получал вообще ничего. Теперь — честная передача человеку.

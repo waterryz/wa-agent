@@ -15,3 +15,14 @@ function mileageContext(text){
  return '\nПРОВЕРЕННЫЙ АРИФМЕТИЧЕСКИЙ РАСЧЁТ (код, не заявление пользователя): '+JSON.stringify({monthly_miles:miles,through_2026:describe(current),from_2027_01_01:describe(future)})+'\nЕсли пробег меньше лимита, перепробег строго 0. Выбери наименьший подходящий лимит; не перескакивай на старший без причины. Не смешивай месячные мили и недельную цену и не считай месяц четырьмя неделями. Будущая скидка $25 только с $675 при выборе предела ущерба $5000; это отдельный выбор, не депозит. Не называй более дешёвым вариант без сопоставимого расчёта.';
 }
 module.exports={POLICY,mileageContext};
+function mileageAnswer(text,language='ru'){
+ if(language!=='ru'||!/(?:тариф|вариант).*(?:подойд|выбра|посовет|лучше)|(?:подойд|выбра|посовет|лучше).*тариф/i.test(text)||/(?:долг|оплатил|верните|платёж|платеж|списал|договоре)/i.test(text))return null;
+ const c=mileageContext(text);if(!c)return null;const j=JSON.parse(c.slice(c.indexOf('{'),c.lastIndexOf('}')+1));
+ const choose=a=>a.find(x=>x.monthly_limit==='unlimited'||x.monthly_limit>=j.monthly_miles);
+ const old=choose(j.through_2026),next=choose(j.from_2027_01_01),fmt=p=>'$'+p.weekly+'/неделю — '+(p.monthly_limit==='unlimited'?'безлимитный пробег':p.monthly_limit+' миль/месяц, без перепробега');
+ const date=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const textOut='При пробеге '+j.monthly_miles+' миль/месяц вариант без перепробега:\n'+(date<'2027-01-01'?'До 31 декабря 2026: '+fmt(old)+'.\n':'')+'С 1 января 2027: '+(next.monthly_limit==='unlimited'?'Old School Style — ':'New Style — ')+fmt(next)+'.\n\nСкидка $25 возможна только с базовых $675 при выборе предела ущерба $5000; это отдельное условие, а не депозит. Для действующего арендатора приоритет у подписанного договора.';
+ return {id:'calculated_mileage',text:textOut,source:'Reviewed dated tariff table; deterministic arithmetic',version:'2026-11-01.2',action:null};
+}
+function playful(text){return String(text).length<350&&!/(?:сломал|авари|травм|срочно|болит|пожар|не завод|скрыт.*инструк|чуж.*данн|пароль)/i.test(text)&&/(?:марсиан|воображаем|вампир|самооценк|ведр.*обещан|аренд.*половин|половин.*машин|зарабатыва.*сам|сама зарабатывает|ручн.*клад|накрою.*одометр|одометр.*полотен|по запах|прошивк|залить.*кофе|кофе.*гибрид|объеду Землю|назову машин|похуде|испачкал дождь|до конца моей жизни|29 февраля|аренд.*улыбк|улыбк.*сдача|задним ходом.*мили)/i.test(text);}
+module.exports.mileageAnswer=mileageAnswer;module.exports.playful=playful;

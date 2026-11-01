@@ -17,3 +17,4 @@ test('web core guard bypasses embeddings, generation and vision; operator takeov
  assert.equal((await core.processMessage(p)).action,'session_pause');
  operator=true;assert.equal((await core.processMessage({...p,images:[{b64:'synthetic',mime:'image/jpeg'}]})).operator_mode,true);assert.equal(calls,0);
 });
+test('tariff recommendation uses arithmetic across boundaries, not model guesses',()=>{const{mileageAnswer,playful}=require('./dialogue_policy');for(const n of [2500,2501,3200,3500,3501,4500,4501]){const r=mileageAnswer('Я проезжаю '+n+' миль в месяц. Какой тариф мне подойдёт?');assert(r);const future=r.text.split('С 1 января 2027:')[1];assert.match(future,/без перепробега|безлимитный/);}assert.equal(mileageAnswer('Я оплатил 3200 миль в месяц, какой тариф выбрать?'),null);assert(playful('Можно платить аренду по марсианским неделям?'));assert(!playful('Срочно: залил кофе в бак, машина не заводится'));});
