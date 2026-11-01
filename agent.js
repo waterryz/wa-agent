@@ -108,6 +108,7 @@ async function translateForRetrieval(text) {
     const res = await kimi.chat.completions.create(
       {
         model: TRANSLATE_MODEL,
+        thinking: { type: 'disabled' },
         max_tokens: 1024,
         messages: [
           {
@@ -660,6 +661,7 @@ async function generateReply(systemPrompt, history) {
   const res = await kimi.chat.completions.create(
     {
       model: KIMI_MODEL,
+      thinking: { type: 'disabled' },
       messages,
       max_tokens: KIMI_MAX_TOKENS,
     },
