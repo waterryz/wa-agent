@@ -161,6 +161,9 @@ async function fetchAdminFacts(limit = ADMIN_FACTS_LIMIT) {
 
 // ── RAG: факты (knowledge) + стиль (conversations) одним эмбеддингом ──
 async function retrieveContext(text) {
+  const began = performance.now();
+  const timings = {};
+  const timed = async (name, fn) => { const t = performance.now(); try { return await fn(); } finally { timings[name] = Math.round(performance.now() - t); } };
   let examples = [];
   let vectorFacts = [];
   let embedTokens = 0;
@@ -169,7 +172,7 @@ async function retrieveContext(text) {
   // чтобы (а) сбой эмбеддинга не убивал приоритетные факты, (б) не платить лишним
   // round-trip'ом к Supabase. fetchAdminFacts никогда не бросает — unhandled rejection
   // невозможен.
-  const adminPromise = fetchAdminFacts();
+  const adminPromise = timed('admin_ms', () => fetchAdminFacts());
 
   const query = (text || '').trim();
   if (!query) {
@@ -180,14 +183,16 @@ async function retrieveContext(text) {
       examples: [],
       facts: only.map((f) => ({ content: f.content, priority: true })),
       embedTokens: 0,
+      timings: { ...timings, retrieval_ms: Math.round(performance.now() - began) },
     };
   }
 
   try {
     // Иноязычный запрос переводим на русский, чтобы находить русские факты/примеры.
-    const queryForEmbed = hasCyrillic(query) ? query : await translateForRetrieval(query);
-    const { embedding, tokens } = await embed(queryForEmbed);
+    const queryForEmbed = hasCyrillic(query) ? query : await timed('translation_ms', () => translateForRetrieval(query));
+    const { embedding, tokens } = await timed('embedding_ms', () => embed(queryForEmbed));
     embedTokens = tokens;
+    const vectorStarted = performance.now();
     const [conv, know] = await Promise.all([
       supabase.rpc('match_conversations', {
         query_embedding: embedding,
@@ -200,6 +205,7 @@ async function retrieveContext(text) {
         match_count: KNOW_TOP_K,
       }),
     ]);
+    timings.vector_ms = Math.round(performance.now() - vectorStarted);
     if (conv.error) console.error('⚠️  match_conversations:', conv.error.message);
     else examples = conv.data || [];
     if (know.error) console.error('⚠️  match_knowledge:', know.error.message);
@@ -223,7 +229,7 @@ async function retrieveContext(text) {
       .map((f) => ({ content: f.content, priority: false })),
   ];
 
-  return { examples, facts, embedTokens };
+  return { examples, facts, embedTokens, timings: { ...timings, retrieval_ms: Math.round(performance.now() - began) } };
 }
 
 // ── Общий vision-вызов ───────────────────────────────────────────────
