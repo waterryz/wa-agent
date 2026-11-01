@@ -156,6 +156,13 @@ function createAssistantRouter(deps = {}) {
         }).catch(() => {});
       }
 
+      // Only numeric durations; no prompts, identifiers, keys or retrieved content.
+      if (result.timings) {
+        const timing = ['embedding_ms', 'translation_ms', 'vector_ms', 'admin_ms', 'retrieval_ms', 'generation_ms', 'core_ms']
+          .filter((key) => Number.isFinite(result.timings[key]) && result.timings[key] >= 0)
+          .map((key) => key + ';dur=' + Math.round(result.timings[key]));
+        if (timing.length) res.set('Server-Timing', timing.join(', '));
+      }
       res.json({
         conversation_id: result.conversation_id,
         reply: result.reply,
