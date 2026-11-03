@@ -14,7 +14,7 @@ function rig(opts={}) {
 }
 for(const [locale,expected] of [['ru','Ответ.'],['en','Answer.'],['ka','პასუხი.']]) {
  test(`first question survives until ${locale} selection; duplicate callbacks cause no replays`,async()=>{
-  const w=rig();const question=body(event('q','Какие машины?'));w.ingest(question);w.ingest(question);await w.processOne();assert.equal(w.calls.length,0);assert.match(w.sent[0].msg.text,/^Здравствуйте! Я Баркая, виртуальный помощник Prime Fusion\..*условиях аренды.*заполнить заявку\.[\s\S]+Выберите язык/);assert.equal(w.sent[0].msg.quick_replies.length,3);
+  const w=rig();const question=body(event('q','Какие машины?'));w.ingest(question);w.ingest(question);await w.processOne();assert.equal(w.calls.length,0);assert.match(w.sent[0].msg.text,/^Здравствуйте! Я Баркай, виртуальный помощник Prime Fusion\..*условиях аренды.*заполнить заявку\.[\s\S]+Выберите язык/);assert.equal(w.sent[0].msg.quick_replies.length,3);
   const choice=body(event('lang','irrelevant display',{message:{mid:'lang',quick_reply:{payload:'language:'+locale}}}));w.ingest(choice);w.ingest(choice);await w.processOne();assert.equal(w.sent.length,2);assert.equal(w.calls[0].text,'Какие машины?');assert.equal(w.calls[0].locale,locale);assert.equal(w.sent[1].msg.text,expected);
   w.ingest(body(event('more','Ещё вопрос')));await w.processOne();assert.equal(w.sent.length,3);assert.equal(w.sent[2].msg.text,expected);assert.equal(w.calls[1].history[0].content,'Какие машины?');assert.equal(await w.processOne(),false);
  });

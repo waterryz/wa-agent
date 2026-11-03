@@ -8,7 +8,7 @@ const ENDPOINT = '/messenger/webhook';
 const MAX_AGE = 24 * 60 * 60 * 1000;
 const KEEP = 7 * MAX_AGE;
 const LABELS = { ru: 'Русский', en: 'English', ka: 'ქართული' };
-const WELCOME = 'Здравствуйте! Я Баркая, виртуальный помощник Prime Fusion. Расскажу об условиях аренды и помогу заполнить заявку.';
+const WELCOME = 'Здравствуйте! Я Баркай, виртуальный помощник Prime Fusion. Расскажу об условиях аренды и помогу заполнить заявку.';
 const INVITATION = { ru: 'Чем могу помочь?', en: 'How can I help?', ka: 'რით შემიძლია დაგეხმაროთ?' };
 const UNSUPPORTED = { ru: 'Пожалуйста, напишите вопрос текстом.', en: 'Please send your question as text.', ka: 'გთხოვთ, კითხვა ტექსტურად მომწეროთ.' };
 
