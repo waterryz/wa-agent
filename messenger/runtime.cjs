@@ -8,11 +8,7 @@ const ENDPOINT = '/messenger/webhook';
 const MAX_AGE = 24 * 60 * 60 * 1000;
 const KEEP = 7 * MAX_AGE;
 const LABELS = { ru: 'Русский', en: 'English', ka: 'ქართული' };
-const INTRO = {
-  ru: 'Я ИИ-ассистент Prime Fusion.',
-  en: 'I’m the Prime Fusion AI assistant.',
-  ka: 'მე Prime Fusion-ის ხელოვნური ინტელექტის ასისტენტი ვარ.'
-};
+const WELCOME = 'Здравствуйте! Я Баркая, виртуальный помощник Prime Fusion. Расскажу об условиях аренды и помогу заполнить заявку.';
 const INVITATION = { ru: 'Чем могу помочь?', en: 'How can I help?', ka: 'რით შემიძლია დაგეხმაროთ?' };
 const UNSUPPORTED = { ru: 'Пожалуйста, напишите вопрос текстом.', en: 'Please send your question as text.', ka: 'გთხოვთ, კითხვა ტექსტურად მომწეროთ.' };
 
@@ -27,9 +23,10 @@ function languageChoice(text) {
   return Object.keys(LABELS).find(code => [code, `language:${code}`, LABELS[code].toLowerCase()].includes(value));
 }
 
-function languagePrompt() {
+function languagePrompt(first) {
+  const prompt = 'Выберите язык общения / Choose your language / აირჩიეთ ენა';
   return {
-    text: 'Выберите язык общения / Choose your language / აირჩიეთ ენა',
+    text: first ? WELCOME + '\n\n' + prompt : prompt,
     quick_replies: Object.entries(LABELS).map(([code, title]) => ({ content_type: 'text', title, payload: `language:${code}` }))
   };
 }
@@ -117,7 +114,7 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       let locale = session.locale, pending = session.pending, output;
       if (!session.asked || (!locale && !languageChoice(row.choice || row.text))) {
         if (!session.asked) pending = languageChoice(row.choice || row.text) ? '' : row.text;
-        output = languagePrompt();
+        output = languagePrompt(!session.asked);
       } else {
         const selected = !locale;
         if (selected) locale = languageChoice(row.choice || row.text);
@@ -129,7 +126,7 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
           response = await answer({pageId,sender:row.sender,locale,text:question,history});
           if (typeof response !== 'string' || !response.trim()) throw Error('No answer');
         }
-        output = {text: selected ? `${INTRO[locale]}\n\n${response.trim()}` : response.trim()};
+        output = {text: response.trim()};
         // Store the actual opening question as history, not its quick-reply label.
         if (selected) exec('UPDATE messenger_inbox SET text=? WHERE seq=?',question || '',row.seq);
         pending = null;
