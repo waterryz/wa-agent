@@ -12,7 +12,7 @@ function matches(token) {
 
 function matchesPairing(code) {
   return Date.now() < Date.parse('2026-11-04T15:00:00Z') &&
-    hasDigest(code, '70101cf3477569df3387f4df13f33e48c719d75e69da59d244c136b2d2d7a841');
+    hasDigest(code, 'feafd4cd1657d8292a951185ce520e396e4cdbe81f138beb9daa0ff5aa22c41a');
 }
 
 module.exports = { matches, matchesPairing };
