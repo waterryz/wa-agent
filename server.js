@@ -641,6 +641,7 @@ async function sendTelegram(chatId, text) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const app = express();
+require('./messenger/runtime.cjs').mountMessenger(app, express);
 // Лимит поднят: через /assistant/chat может прилетать фото в base64 с сайта.
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '25mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
