@@ -31,6 +31,40 @@ function languagePrompt(first) {
   };
 }
 
+function pilotSummary(db, pageId) {
+  return db.prepare(`SELECT
+    count(DISTINCT p.page) AS paired, coalesce(max(s.asked),0) AS session_asked,
+    coalesce(max(s.hold),0) AS session_hold,
+    count(*) FILTER (WHERE i.state='asked') AS asked,
+    count(*) FILTER (WHERE i.state='answered') AS answered,
+    count(*) FILTER (WHERE i.state='queued') AS queued,
+    count(*) FILTER (WHERE i.state='unknown') AS unknown,
+    count(*) FILTER (WHERE i.state='skipped') AS skipped
+    FROM messenger_test_pair p
+    LEFT JOIN messenger_session s USING(page,sender)
+    LEFT JOIN messenger_inbox i USING(page,sender)
+    WHERE p.page=?`).get(pageId);
+}
+
+function logPilotEnvelope(db,pageId,body,matchesPairing) {
+  for (const entry of body.entry) {
+    if (entry?.id!==pageId) continue;
+    for (const kind of ['messaging','standby']) {
+      if (!Array.isArray(entry[kind])) continue;
+      for (const event of entry[kind]) {
+        const msg=event?.message;
+        if (event?.recipient?.id!==pageId || msg?.is_echo || typeof msg?.text!=='string') continue;
+        const marker=msg.text.slice(0,10000).match(/(?:^|\s)#test:([^\s]{1,256})\s*$/u);
+        if (!marker || !matchesPairing(marker[1])) continue;
+        const recorded=kind==='messaging' && typeof event.sender?.id==='string' && typeof msg.mid==='string'
+          && db.prepare(`SELECT 1 FROM messenger_test_pair p JOIN messenger_inbox i USING(page,sender)
+            WHERE p.page=? AND p.sender=? AND i.mid=?`).get(pageId,event.sender.id,msg.mid);
+        console.log('Messenger owner pilot marker',kind,recorded?'accepted':'skipped');
+      }
+    }
+  }
+}
+
 function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, send, now = Date.now }) {
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
     CREATE TABLE IF NOT EXISTS messenger_session (
@@ -166,7 +200,7 @@ function mountMessenger(app,express,{env=process.env, verification=require('./ve
   const mount=env.RAILWAY_VOLUME_MOUNT_PATH, version=env.META_GRAPH_VERSION || 'v26.0';
   const allowSender = id => env.META_LIVE_APPROVED==='1' || id===env.META_TEST_PSID;
   const matchesPairing = env.META_LIVE_APPROVED!=='1' && !env.META_TEST_PSID && typeof verification.matchesPairing==='function' ? verification.matchesPairing : null;
-  let worker;
+  let worker, pilotDb;
   if(pageId==='886266774570877' && env.META_APP_SECRET && env.META_PAGE_ACCESS_TOKEN && /^v\d+\.\d+$/.test(version) && mount && path.isAbsolute(mount) && fs.existsSync(mount) && (matchesPairing || env.META_LIVE_APPROVED==='1' || /^\d+$/.test(env.META_TEST_PSID||''))) {
     try {
       const {DatabaseSync}=require('node:sqlite');
@@ -179,6 +213,11 @@ function mountMessenger(app,express,{env=process.env, verification=require('./ve
           return result.recipient_id===sender && result.message_id;
         }});
       worker.prune();
+      if (matchesPairing) {
+        pilotDb=db;
+        try { console.log('Messenger owner pilot summary',JSON.stringify(pilotSummary(db,pageId))); }
+        catch { console.error('Messenger owner pilot summary unavailable'); }
+      }
       const tick=()=>worker.processOne().catch(()=>console.error('Messenger worker unavailable'));
       setInterval(tick,500).unref();
       setInterval(()=>{try{worker.prune();}catch{console.error('Messenger retention failed');}},3600000).unref();
@@ -189,8 +228,13 @@ function mountMessenger(app,express,{env=process.env, verification=require('./ve
     if(!validSignature(req.body,req.get('X-Hub-Signature-256'),env.META_APP_SECRET))return res.sendStatus(403);
     let body;try{body=JSON.parse(req.body.toString('utf8'));}catch{return res.sendStatus(400);}
     if(body?.object!=='page'||!Array.isArray(body.entry))return res.sendStatus(400);
-    try{worker.ingest(body);return res.sendStatus(200);}catch{return res.sendStatus(503);}
+    try{worker.ingest(body);}catch{return res.sendStatus(503);}
+    if(pilotDb) {
+      try{logPilotEnvelope(pilotDb,pageId,body,matchesPairing);}
+      catch{console.error('Messenger owner pilot marker observation unavailable');}
+    }
+    return res.sendStatus(200);
   });
 }
 
-module.exports={mountMessenger,createWorker,validSignature};
+module.exports={mountMessenger,createWorker,validSignature,pilotSummary,logPilotEnvelope};

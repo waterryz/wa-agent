@@ -2,7 +2,7 @@
 const test=require('node:test'), assert=require('node:assert/strict');
 const {DatabaseSync}=require('node:sqlite');
 const crypto=require('node:crypto');
-const {createWorker,validSignature,mountMessenger}=require('./runtime.cjs');
+const {createWorker,validSignature,mountMessenger,pilotSummary,logPilotEnvelope}=require('./runtime.cjs');
 const page='886266774570877',sender='1000001',app='1627739205746711';
 const ts=1700000000000;
 function event(mid,text,opts={}) {return {sender:{id:sender},recipient:{id:page},timestamp:ts,message:{mid,text},...opts};}
@@ -41,3 +41,17 @@ test('verification unaffected by missing sender or SQLite; POST fails closed',()
  assert.equal(get({query:{'hub.mode':'subscribe','hub.verify_token':'ok','hub.challenge':'challenge'}},response),'challenge');assert.equal(get({query:{}},response),403);assert.equal(post({},response),503);
 });
 test('signature compares exact body bytes',()=>{const a=Buffer.from('{"x":1}'),sig='sha256='+crypto.createHmac('sha256','test').update(a).digest('hex');assert(validSignature(a,sig,'test'));assert(!validSignature(Buffer.from('{"x": 1}'),sig,'test'));assert(!validSignature(a,'invalid','test'));});
+
+test('owner diagnostics are read-only and omit all unrelated traffic and identifiers',async t=>{
+ const matches=code=>code==='synthetic',w=rig({allowSender:()=>true,matchesPairing:matches});
+ const other=event('other','separate',{sender:{id:'200'}}),owner=event('pilot','Question #test:synthetic');
+ w.ingest(body(other)); await w.processOne();
+ assert.deepEqual({...pilotSummary(w.db,page)},{paired:0,session_asked:0,session_hold:0,asked:0,answered:0,queued:0,unknown:0,skipped:0});
+ w.ingest(body(owner)); await w.processOne();w.ingest(body(event('stop','STOP')));
+ w.db.exec('PRAGMA query_only=ON');
+ assert.deepEqual({...pilotSummary(w.db,page)},{paired:1,session_asked:1,session_hold:1,asked:1,answered:0,queued:1,unknown:0,skipped:0});
+ const logs=t.mock.method(console,'log',()=>{});
+ const payload=body(other,owner);payload.entry[0].standby=[owner,other];
+ logPilotEnvelope(w.db,page,payload,matches);
+ assert.deepEqual(logs.mock.calls.map(c=>c.arguments),[['Messenger owner pilot marker','messaging','accepted'],['Messenger owner pilot marker','standby','skipped']]);
+});
