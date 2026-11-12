@@ -8,6 +8,8 @@ test('explicit hazards stop unsafe continuation and preserve emergency priority'
  assert.match(acuteSafety('Красный индикатор масла').text,/выключите двигатель/);
  assert.match(acuteSafety('I am falling asleep while driving','en').text,/do not try to finish/);
  assert.match(acuteSafety('The tire is losing pressure','en').text,/Stop safely/);
+  assert.match(acuteSafety('У меня паническая атака с пассажиром в машине').text,/боль в груди/);
+  assert.match(acuteSafety('I am having a panic attack','en').text,/Call911 now/);
 });
 test('routine, negated, historic and unrelated content does not trigger an acute response',()=>{
  for(const t of ['Какое масло использовать?','Когда менять шины?','Кровь уже не течёт','Нет запаха бензина','Вчера шина спускала, уже починили','Сколько стоит аренда?','Плановый сервис через6000миль','Я на пароме, это морские мили?']) assert.equal(acuteSafety(t),null,t);

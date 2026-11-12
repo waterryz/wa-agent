@@ -7,7 +7,10 @@ function acuteSafety(text, language='ru') {
   // Questions about scheduled maintenance or past events remain in normal RAG.
   if (/(?:вчера|прошлой неделе|раньше|уже почин|уже устран|не теч|не кров|нет запах|не пахнет|yesterday|last week|already fixed|no smell|not bleeding)/i.test(t)) return null;
   let id,ru,en;
-  if (/(?:засыпаю|клюю носом|проваливаюсь в сон|засыпать за рул|falling asleep|nodding off)/i.test(t)) {
+  if (/(?:у меня|мне|я).*(?:паническ|паник)|(?:I am|I'm|I’m).*(?:panic attack|panicking)/i.test(t)) {
+    id='driver_panic';ru='Безопасно остановитесь в ближайшем подходящем месте и не продолжайте движение, пока состояние мешает управлению. Спокойно объясните пассажиру, что нужна пауза; не выходите на проезжую часть. Если есть боль в груди, выраженная нехватка воздуха, обморок, новые необычные симптомы или сомнения, что это только паника, вызовите911 сейчас и следуйте указаниям диспетчера. По чату нельзя исключить опасную причину симптомов. Свяжитесь с компанией и поддержкой платформы для безопасного завершения поездки.';
+    en='Pull over safely in a suitable place and do not resume while your condition affects driving. Tell the passenger you need to stop; do not step into traffic. Call911 now for chest pain, severe breathing difficulty, fainting, new unusual symptoms, or uncertainty that this is only panic. Follow the dispatcher’s instructions. Chat cannot rule out a dangerous cause. Contact the company and platform support to arrange a safe end to the ride.';
+  } else if (/(?:засыпаю|клюю носом|проваливаюсь в сон|засыпать за рул|falling asleep|nodding off)/i.test(t)) {
     id='drowsy';ru='Безопасно остановитесь в разрешённом месте и прекратите поездку — не пытайтесь сначала довезти пассажира. Сообщите пассажиру и поддержке платформы, что продолжать небезопасно, организуйте дальнейшую поездку. Отдохните; не возвращайтесь за руль, пока сонливость не прошла. Кофе и открытое окно не заменяют отдых.';
     en='Pull over safely in a permitted location and stop driving; do not try to finish the ride first. Tell the passenger and platform support that continuing is unsafe and arrange onward transport. Rest and do not resume until you are alert. Coffee or an open window does not replace rest.';
   } else if (/(?:кров|bleed)/i.test(t)&&/(?:сильн|не останав|ль[её]т|хлещ|обильно|severe|heavily|won.t stop)/i.test(t)) {
