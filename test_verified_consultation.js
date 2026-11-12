@@ -10,6 +10,14 @@ test('multiple-choice label is reconciled only against a unique literal option, 
  const q='Когда?\nА)Завтра.\nБ)Уведомить компанию минимум за три дня.\nВ)Задним числом.';
  assert.match(chooseLiteralOption(q,'В) Уведомить компанию минимум за три календарных дня.\nПояснение.'),/^Б\)/);
  assert.equal(chooseLiteralOption(q,'В) Задним числом.'),'В) Задним числом.');
+ assert.match(chooseLiteralOption(q,'В. Уведомить компанию минимум за три календарных дня. Переход с первого числа.'),/^Б\./);
  assert.equal(chooseLiteralOption(q,'Не уверен.'),'Не уверен.');
  assert.equal(chooseLiteralOption('Без вариантов','А) Да'),'А) Да');
+});
+test('ambiguous warning and onboarding never grant unsafe movement or invent submission',()=>{
+ assert.match(consultation('Автомобиль сказал, что хочет пить').text,/без диагноза/);
+ assert.match(consultation('Какие предупреждения на приборной панели нельзя путать с сервисным напоминанием?').text,/нельзя разрешать движение/);
+ assert.match(consultation('Компания запрещает эксплуатацию из-за погоды').text,/не продолжайте до конца заказа/);
+ assert.match(consultation('Я впервые у вас на сайте, с чего начать?').text,/На каком языке/);
+ assert.match(consultation('Хочу оставить заявку').text,/заявку не отправлял/);
 });
