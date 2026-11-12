@@ -23,6 +23,12 @@ function createKnowledgeIndex({db,embedBatch,pack,model,approvedDigest}) {
   if(pending)return pending;
   pending=(async()=>{
    status.state='loading';
+   if(pack.version.startsWith('2026-11-12.')) {
+    const bundle=require('./reviewed-embeddings.json');
+    if(bundle.version!==pack.version||bundle.model!==model||bundle.digest!==digest||digest!==approvedDigest)fail('bundled_index_identity_mismatch');
+    cached=validate(bundle.records);if(!cached)fail('bundled_index_incomplete');
+    status.state='ready';status.count=cached.length;status.storage='reviewed_release_bundle';return;
+   }
    cached=await load();if(cached){status.state='ready';status.count=cached.length;return;}
    if(pack.version!=='2026-10-31.3'||digest!==approvedDigest)fail('index_build_not_authorized');
    // Deterministic primary-key claim prevents two instances creating embeddings.

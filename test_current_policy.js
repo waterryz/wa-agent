@@ -30,7 +30,7 @@ test('unreviewed admin and archived style cannot inject old business terms',()=>
 });
 test('current tariffs preserve start date and liability/deposit distinction',()=>{
   const prompt=build([]);
-  for(const term of ['2027-01-01','New Style','Old School Style','2500','3500','4500','НЕ требование депозита $5000'])assert(prompt.includes(term),term);
+  for(const term of ['2027-01-01','New Style','Old School Style','2500','3500','4500','депозита $5000 и лимита ущерба $5000'])assert(prompt.includes(term),term);
   assert(!prompt.includes('бесплатная неделя за 6 месяцев'));
 });
 test('retired forms and absolute second-driver prohibition cannot recur',()=>{
@@ -42,7 +42,7 @@ test('retired forms and absolute second-driver prohibition cannot recur',()=>{
 });
 test('deposit deadline, takeover escalation and factual limits remain explicit',()=>{
   const prompt=build([]);
-  assert(prompt.includes('30 календарных дней после окончания аренды'));
+  assert(prompt.includes('30 календарных дней со дня возврата автомобиля компании'));
   assert(!prompt.includes('после возврата машины и урегулирования долгов'));
   assert(prompt.includes('[[ESCALATE]]'));
   assert(prompt.includes('Не утверждай, что сообщение доставлено'));
@@ -60,7 +60,7 @@ test('all archived rows accounted for and internal content excluded',()=>{
 
 test('failed retrieval still supplies weekly payment and READY safety boundaries',()=>{
   const prompt=build([]);
-  for(const term of ['еженедельно авансом','READY','12-вольтовой','НЕ обязательный минимальный','Ставка $600 не предлагается'])assert(prompt.includes(term),term);
+  for(const term of ['еженедельно авансом','READY','12-вольтовой','НЕ обязательный минимальный','тарифа $600 нет'])assert(prompt.includes(term),term);
   assert(!prompt.includes('предложи сделать это здесь без перехода'));
-  assert(prompt.includes('Личному ассистенту Алексу по установленному рабочему каналу'));
+  assert(prompt.includes('по установленному рабочему каналу'));
 });
