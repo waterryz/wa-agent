@@ -167,7 +167,9 @@ async function processMessage({
   if (conv.operator_mode) return emptyResult({ operator_mode: true });
 
   if(!hasPhoto && !faqTopic && require('./non_work').recognized(text)){
-    const nh=historyOverride?historyOverride.slice():await astore.getHistory(conv.id);
+    // Model history merges consecutive user messages. The boundary counter must
+    // see original individual messages so a substantive turn resets it.
+    const nh=await astore.getNonWorkHistory(conv.id);
     const nw=require('./non_work').decide(nh,text,language||'ru');
     if(nw){
       if(nw.reply)await astore.saveMessage(conv.id,'assistant',nw.reply,{fast_answer:true,guard:nw.action,version:require('./non_work').version});

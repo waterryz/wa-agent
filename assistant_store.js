@@ -94,6 +94,13 @@ async function saveMessage(conversationId, role, content, meta = null) {
 // ── История диалога в формате для модели (user/assistant) ────────────
 // operator → assistant (для модели это «наша сторона»), system пропускаем,
 // подряд идущие одинаковые роли склеиваем, ведущие assistant отбрасываем.
+async function getNonWorkHistory(conversationId) {
+  const {data,error}=await supabase.from('assistant_messages')
+    .select('role, content').eq('conversation_id',conversationId).eq('role','user')
+    .order('created_at',{ascending:false}).limit(12);
+  if(error)throw error;
+  return (data||[]).reverse();
+}
 async function getHistory(conversationId, limit = HISTORY_LIMIT) {
   const { data, error } = await supabase
     .from('assistant_messages')
@@ -208,3 +215,5 @@ module.exports = {
   setStatus,
   markAdminRead,
 };
+
+module.exports.getNonWorkHistory=getNonWorkHistory;
