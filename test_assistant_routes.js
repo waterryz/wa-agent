@@ -11,7 +11,11 @@ test('Telegram identity, FAQ and voice require server authentication', async () 
       if (request === './assistant_core') return { processMessage: async args => {
         calls.push(args); return { conversation_id: 1, reply: 'test answer', photo: null, fast_answer: true, action: 'handbook' };
       }};
-      if (request === './agent') return { VISION_MAX_IMAGES: 4 };
+      if (request === './agent') return {
+        VISION_MAX_IMAGES: 4,
+        initializeKnowledgeIndex: async () => {},
+        knowledgeIndexStatus: () => ({state:'ready',count:37,digest:'synthetic-index'})
+      };
       if (['./assistant_store','./store','./admin_assistant','./kb_collector'].includes(request)) return {};
     }
     return old.apply(this, arguments);
