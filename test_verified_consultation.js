@@ -27,3 +27,24 @@ test('numeric monthly mileage reaches the calculator instead of a generic tariff
  assert.equal(consultation(q),null);
  assert.match(require('./dialogue_policy').mileageAnswer(q).text,/\$625\/неделю — 3500 миль/);
 });
+
+test('new offers, existing-renter transition, and mileage share the same effective dates',()=>{
+ const {mileageAnswer}=require('./dialogue_policy');
+ const results=[
+  consultation('Какие у вас сейчас тарифы?'),
+  consultation('Когда новые тарифы начинают действовать для действующих арендаторов?'),
+  consultation('Как выбрать тариф по месячному пробегу?'),
+  mileageAnswer('Я уже арендую. При 3200 миль в месяц какой тариф подойдёт?')
+ ];
+ for(const answer of results){
+  assert.ok(answer);
+  assert.match(answer.text,/для новых арендаторов эта сетка уже действует/i);
+  assert.match(answer.text,/до 31 декабря 2026 года включительно/);
+  assert.match(answer.text,/с 1 января 2027 года/);
+ }
+ assert.match(results[0].text,/\$600 в неделю за 2 500 миль в месяц/);
+ assert.match(results[0].text,/Old School Style — \$650 в неделю с безлимитным пробегом/);
+ assert.match(results[3].text,/\$625\/неделю — 3500 миль/);
+ assert.equal(consultation('Я уже арендую: какой платёж по моему договору?'),null);
+ assert.equal(consultation('Я уже арендую. Новые тарифы дают скидку на депозит?'),null);
+});

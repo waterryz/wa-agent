@@ -23,7 +23,7 @@ function createKnowledgeIndex({db,embedBatch,pack,model,approvedDigest}) {
   if(pending)return pending;
   pending=(async()=>{
    status.state='loading';
-   if((pack.version.startsWith('2026-11-12.')||pack.version==='2026-11-13.1')) {
+   if((pack.version.startsWith('2026-11-12.')||pack.version==='2026-11-13.1'||pack.version==='2026-11-13.2')) {
     const bundle=require('./reviewed-embeddings.json');
     if(bundle.version!==pack.version||bundle.model!==model||bundle.digest!==digest||digest!==approvedDigest)fail('bundled_index_identity_mismatch');
     cached=validate(bundle.records);if(!cached)fail('bundled_index_incomplete');

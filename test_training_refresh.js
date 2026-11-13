@@ -11,7 +11,7 @@ test('release index matches every current topic, no old vectors/search fallback'
 });
 test('reviewed context supplies intake, owner overrides and emergency guidance even if retrieval is empty',()=>{
  const text=require('./knowledge_current').publicFactsBlock([]);
- assert(text.includes('Новые цифры предлагаются соискателям сразу'));
+ for (const condition of ['Для новых арендаторов сетка уже действует','до 31 декабря 2026 года включительно','с 1 января 2027 года','не подтверждает изменение личного счёта']) assert(text.includes(condition), condition);
  assert(text.includes('девять')||text.includes('Девять'));assert(text.includes('ZIP'));assert(text.includes('911'));
  assert(text.includes('депозита $5000')||text.includes('депозит $5000'));assert(text.includes('AMS Auto Doctor'));assert(text.includes('30 календарных дней ОТ ВОЗВРАТА'));
  assert(!text.includes('Сервис KRS'));assert(!text.includes('НЕ требование депозита'));

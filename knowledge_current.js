@@ -20,6 +20,6 @@ function publicFactsBlock(rows) {
   const { facts, unknown } = projectFacts(rows);
   if (unknown) console.warn('Unreviewed knowledge rows excluded from BarkAI context:', unknown);
   const date = new Intl.DateTimeFormat('en-CA', {timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  return `ПРОВЕРЕННЫЙ СПРАВОЧНИК PRIME FUSION (${pack.version}). Сегодня в Нью-Йорке: ${date}.\nАктуальные тарифы брать из темы rates; не оглашать внутреннее исключение о дате предложения новым соискателям; бонусы с 2027-01-01. Не менять подписанный индивидуальный договор. Подписанный индивидуальный договор и подтверждённые записи определяют условия конкретного арендатора.\n\n` + facts.map(f => `[${f.topic}] ${f.content}`).join('\n\n');
+  return `ПРОВЕРЕННЫЙ СПРАВОЧНИК PRIME FUSION (${pack.version}). Сегодня в Нью-Йорке: ${date}.\nАктуальные тарифы брать из темы rates; указывать даты перехода по статусу арендатора; бонусы с 2027-01-01. Не менять подписанный индивидуальный договор. Подписанный индивидуальный договор и подтверждённые записи определяют условия конкретного арендатора.\n\n` + facts.map(f => `[${f.topic}] ${f.content}`).join('\n\n');
 }
 module.exports = { projectFacts, publicFactsBlock, digest, version: pack.version };

@@ -10,11 +10,21 @@ function chooseLiteralOption(question,reply) {
  const matches=opts.filter(o=>norm(o[2])===norm(m[2]) || (norm(o[2]).length>=16 && norm(m[2]).startsWith(norm(o[2]))));
  return matches.length===1?reply.replace(/^\s*[АБВABC](?=[).])/u,matches[0][1]):reply;
 }
+const {pricingTimeline} = require('./dialogue_policy');
+const rateTable = 'New Style — $600 в неделю за 2 500 миль в месяц, $625 за 3 500 или $650 за 4 500. Old School Style — $650 в неделю с безлимитным пробегом, без бонусов.';
 function consultation(text,language='ru') {
  if(language!=='ru')return null;
  const t=String(text||'').trim();if(!t||t.length>1400)return null;
  const exam=/(?:^|\n)\s*[АБВABC][).]/m.test(t);
  let id,answer;
+ const pricingQuestion = /(?:тариф|расценк|ставк|цен[аыу]|стоимость аренды|стоит аренд)/i.test(t);
+ const generalPricing = /^(?:(?:здравствуйте|привет)[!,]?\s*)?(?:какие (?:у вас |сейчас |действуют |новые )*тарифы|какова стоимость аренды|сколько стоит аренда|какая (?:сейчас )?ставка)(?: (?:на аренду|аренды|машины|сейчас|в неделю|у вас))*[?.! ]*$/i.test(t);
+ const cutoverQuestion = /(?:когда|с как\S+ дат|с какого числа|уже действу|уже перех|уже по нов|уже дейст|сейчас|действующ\S* арендатор|уже арендую)/i.test(t);
+ const pricingDetails = /(?:скидк|депозит|бонус|балл|перепробег|ответствен|надбавк|[0-9][.,0-9 ]*\s*(?:мили|миль)|плат[её]ж|сч[её]т|начисл|личн\S* договор|мо[её]м договор|подписан|сменить|долг|Old School|New Style)/i.test(t);
+ if (!exam && !pricingDetails && (generalPricing ||
+     (pricingQuestion && cutoverQuestion && /(?:нов\S* (?:сетк|тариф|цен|ставк|арендатор)|действующ\S* арендатор|уже арендую|давно арендую)/i.test(t)))) {
+  return {id:'verified_pricing_dates',text:rateTable+' '+pricingTimeline,source:'Owner pricing clarification 2026-11-13',version:'2026-11-13.2',action:null};
+ }
  if(!exam&&/(?:машин|автомобил)/i.test(t)&&/(?:хочет пить|просит пить|жажд)/i.test(t)){
   id='playful_thirst';answer='Разговаривающую машину сначала стоит переспросить, что она имеет в виду. Если это шутка — воду водителю, а в машину только предусмотренные инструкцией жидкости; если есть реальное предупреждение, назовите его, без диагноза по шутке.';
  }else if(!exam&&/(?:предупрежден|индикатор|ламп|значк)/i.test(t)&&/(?:приборн|панел)/i.test(t)&&/(?:обслужив|сервис|напоминан|нельзя путать)/i.test(t)){
@@ -45,6 +55,7 @@ function consultation(text,language='ru') {
  }else if(!exam&&/(?:другой водитель|участник)/i.test(t)&&/(?:уехал|скрылся)/i.test(t)&&/(?:столкнов|ДТП|авари)/i.test(t)){
   id='hit_run';answer='Не преследуйте уехавшего водителя. Безопасно остановитесь и проверьте, есть ли пострадавшие или опасность: тогда911. Без экстренной угрозы сообщите полиции по несрочному каналу. Сохраните фото, место, время, номер машины, контакты свидетелей и записи всех камер; сообщите компании. Не признавайте заочно вину и не обещайте страховую выплату.';
  }
+ if(id==='public_fees'||id==='public_plans') answer+=' '+pricingTimeline;
  return answer?{id:'verified_'+id,text:answer,source:'Reviewed company references and conservative operational guidance2026-11-12',version:'2026-11-13.1',action:null}:null;
 }
 module.exports={consultation,chooseLiteralOption};
