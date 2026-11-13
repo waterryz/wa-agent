@@ -83,17 +83,26 @@ test('public webhook keeps two visitors queued across Page token failures and an
     return {unref() {}};
   });
   const answers = t.mock.method(require('./answer.cjs'), 'answer', async ({text}) => 'Reply to ' + text);
-  let tokenState = 'wrong-page';
+  const validToken = {is_valid: true, app_id: app, profile_id: page, type: 'PAGE', scopes: ['pages_messaging']};
+  let debugResponse = validToken, rejectSend = false;
   const deliveries = [], attempts = [];
+  const checks = [];
   async function graph(url, options) {
-    assert.equal(options.headers.Authorization, 'Bearer synthetic-page-token');
-    if (url.endsWith('/me?fields=id')) {
-      return {ok: true, json: async () => ({id: tokenState === 'wrong-page' ? '999' : page})};
+    const target = new URL(url);
+    assert.equal(target.origin, 'https://graph.facebook.com');
+    assert.equal(options.redirect, 'error');
+    if (target.pathname === '/v26.0/debug_token') {
+      assert.equal(options.headers.Authorization, 'Bearer ' + app + '|' + secret);
+      assert.deepEqual([...target.searchParams], [['input_token', 'synthetic-page-token']]);
+      checks.push(debugResponse);
+      return {ok: true, json: async () => ({data: debugResponse})};
     }
-    assert.equal(new URL(url).pathname, '/v26.0/' + page + '/messages');
+    assert.equal(options.headers.Authorization, 'Bearer synthetic-page-token');
+    assert.equal(target.pathname, '/v26.0/' + page + '/messages');
+    assert.equal(target.search, '');
     const outgoing = JSON.parse(options.body);
     attempts.push(outgoing);
-    if (tokenState === 'expired-at-send') {
+    if (rejectSend) {
       return {ok: false, status: 400, json: async () => ({error: {code: 190}})};
     }
     deliveries.push(outgoing);
@@ -119,19 +128,25 @@ test('public webhook keeps two visitors queued across Page token failures and an
   }
   const questions = ['Is the Sienna available?', 'How much is the rental?'];
   submit('question-', questions);
-  await tick();
-  assert.equal(attempts.length, 0);
-  assertBothQueued();
+  for (const invalid of [{profile_id: '999'}, {app_id: '999'}, {is_valid: false},
+                         {type: 'USER'}, {scopes: ['pages_read_engagement']}]) {
+    debugResponse = {...validToken, ...invalid};
+    await tick();
+    assert.equal(checks.at(-1), debugResponse);
+    assert.equal(attempts.length, 0);
+    assertBothQueued();
+    now += 6 * 60 * 1000;
+  }
 
-  now += 6 * 60 * 1000;
-  tokenState = 'expired-at-send';
+  debugResponse = validToken;
+  rejectSend = true;
   await tick();
   await tick();
   assert.equal(attempts.length, 1);
   assertBothQueued();
 
   now += 6 * 60 * 1000;
-  tokenState = 'valid';
+  rejectSend = false;
   await tick();
   await tick();
   assert.deepEqual(deliveries.map(d => d.recipient.id), visitors);

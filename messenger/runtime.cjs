@@ -231,15 +231,22 @@ function mountMessenger(app,express,{env=process.env, verification=require('./ve
     try {
       const {DatabaseSync}=require('node:sqlite');
       const db=new DatabaseSync(path.join(mount,'prime-fusion-messenger.sqlite'));
-      const authHeaders = {Authorization:'Bearer '+env.META_PAGE_ACCESS_TOKEN};
       let pageReady = !publicReplies, nextCheck = 0;
       async function confirmPage() {
         if (pageReady) return true;
         if (Date.now()<nextCheck) return false;
         nextCheck = Date.now()+PUBLIC_TOKEN_RECHECK;
         try {
-          const check = await fetchImpl(`https://graph.facebook.com/${version}/me?fields=id`,{headers:authHeaders,redirect:'error',signal:AbortSignal.timeout(15000)});
-          pageReady = check.ok && (await check.json()).id===pageId;
+          const url = new URL(`https://graph.facebook.com/${version}/debug_token`);
+          url.searchParams.set('input_token', env.META_PAGE_ACCESS_TOKEN);
+          const check = await fetchImpl(url, {
+            headers: {Authorization: 'Bearer ' + appId + '|' + env.META_APP_SECRET},
+            redirect: 'error', signal: AbortSignal.timeout(15000),
+          });
+          const token = check.ok ? (await check.json()).data : null;
+          pageReady = token?.is_valid === true && token.app_id === appId &&
+            token.type === 'PAGE' && token.profile_id === pageId &&
+            Array.isArray(token.scopes) && token.scopes.includes('pages_messaging');
         } catch { pageReady = false; }
         console.log('Messenger Page token check:',pageReady?'ready':'waiting');
         return pageReady;
