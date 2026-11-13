@@ -8,7 +8,7 @@ function createDialogueGuard({now=Date.now,maxEntries=5000}={}){
  const sessions=new Map(),ips=new Map(),salt=randomBytes(32);
  const hash=s=>createHmac('sha256',salt).update(String(s)).digest('hex');
  function prune(map){const t=now();for(const[k,v]of map)if(v.expires<=t)map.delete(k);while(map.size>=maxEntries)map.delete(map.keys().next().value);}
- function begin({id,ip,text,language='ru',hasAttachment=false}){
+ function begin({id,ip,text,language='ru',hasAttachment=false,semanticBoundary=false}){
   prune(sessions);prune(ips);const t=now(),key=hash(id),ipkey=isIP(ip||'')?hash(ip):null;
   const p=phrases[language]||phrases.ru;
   const deny=(reason,reply,seconds=0)=>({allowed:false,reason,reply,retryAfter:seconds});
@@ -20,7 +20,7 @@ function createDialogueGuard({now=Date.now,maxEntries=5000}={}){
   const n=normal(text);
   if(!hasAttachment&&closing.test(n)){s.closed=true;s.expires=t+1800000;return deny('conversation_closed',p.closed);}
   if(s.active)return deny('session_inflight',p.busy,10);
-  if(!hasAttachment&&n&&n===s.last){s.repeat++;if(s.repeat>=2){s.pausedUntil=t+900000;s.expires=s.pausedUntil;return deny('session_pause',p.paused,900);}return deny('duplicate_answered',p.repeat);}
+  if(!semanticBoundary&&!hasAttachment&&n&&n===s.last){s.repeat++;if(s.repeat>=2){s.pausedUntil=t+900000;s.expires=s.pausedUntil;return deny('session_pause',p.paused,900);}return deny('duplicate_answered',p.repeat);}
   s.closed=false;s.active=true;s.expires=t+1800000;if(rate)rate.active++;
   let done=false;
   return{allowed:true,finish(success){if(done)return;done=true;s.active=false;if(rate)rate.active=Math.max(0,rate.active-1);if(success){s.last=hasAttachment?'':n;s.repeat=0;}}};

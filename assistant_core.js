@@ -107,7 +107,7 @@ async function processMessage({
     driver_id,
   });
 
-  const gate=channel==='web'&&!conv.operator_mode ? dialogueGuard.begin({id:String(conv.id),ip:clientIp,text,language:language||'ru',hasAttachment:hasPhoto||Boolean(faqTopic)}) : null;
+  const gate=channel==='web'&&!conv.operator_mode ? dialogueGuard.begin({id:String(conv.id),ip:clientIp,text,language:language||'ru',hasAttachment:hasPhoto||Boolean(faqTopic),semanticBoundary:!hasPhoto&&!faqTopic&&require('./non_work').recognized(text)}) : null;
   if(gate&&!gate.allowed){
     await astore.saveMessage(conv.id,'user',text||'[Attachment]');
     await astore.saveMessage(conv.id,'assistant',gate.reply,{fast_answer:true,guard:gate.reason});
@@ -165,6 +165,16 @@ async function processMessage({
 
   // Оператор забрал чат на себя → ИИ не отвечает.
   if (conv.operator_mode) return emptyResult({ operator_mode: true });
+
+  if(!hasPhoto && !faqTopic && require('./non_work').recognized(text)){
+    const nh=historyOverride?historyOverride.slice():await astore.getHistory(conv.id);
+    const nw=require('./non_work').decide(nh,text,language||'ru');
+    if(nw){
+      if(nw.reply)await astore.saveMessage(conv.id,'assistant',nw.reply,{fast_answer:true,guard:nw.action,version:require('./non_work').version});
+      guardAnswered=true;
+      return emptyResult({reply:nw.reply||null,fast_answer:true,action:nw.action});
+    }
+  }
 
   const fast = (!hasPhoto && !faqTopic ? (require('./acute_safety').acuteSafety(text,language||'ru') || require('./verified_consultation').consultation(text,language||'ru') || require('./dialogue_policy').mileageAnswer(text,language||'ru') || require('./dialogue_policy').playfulFast(text,language||'ru')) : null) || fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
   if (fast) {
