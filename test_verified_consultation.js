@@ -28,6 +28,17 @@ test('numeric monthly mileage reaches the calculator instead of a generic tariff
  assert.match(require('./dialogue_policy').mileageAnswer(q).text,/\$625\/неделю — 3500 миль/);
 });
 
+test('routine application checks stay in the staff-visible chat; the anonymous site gives its actual limitation',()=>{
+ const question='Анкета зависла после отправки, что делать?';
+ assert.match(consultation(question,'ru','telegram').text,/дождитесь ответа в этом чате/);
+ assert.match(consultation(question,'ru','web').text,/обычном рабочем чате/);
+ const facts=require('./knowledge_current').publicFactsBlock([]);
+ const policy=require('./dialogue_policy').POLICY;
+ for(const text of [facts,policy]){
+  assert.doesNotMatch(text,/корпоративный email|дать email|дать только раздел контактов|иначе предложить https:\/\/primefusioncars\.com\/#contacts/i);
+ }
+});
+
 test('new offers, existing-renter transition, and mileage share the same effective dates',()=>{
  const {mileageAnswer}=require('./dialogue_policy');
  const results=[

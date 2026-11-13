@@ -2,7 +2,7 @@
 const crypto = require('node:crypto');
 const pack = require('./knowledge_current.json');
 const digest = text => crypto.createHash('sha256').update(String(text || '').replace(/\r\n/g, '\n').trim()).digest('hex');
-const index = new Map(Object.entries(pack.topics).map(([topic,t]) => [digest(t.text), {topics:[topic]}]));
+const index = new Map(Object.entries(pack.topics).map(([topic,t]) => [digest(t.indexedText || t.text), {topics:[topic]}]));
 // Only current canonical texts enter model context. The old database rows and
 // embeddings are retained for rollback and are never searched by this release.
 // A changed/new row is not silently treated as reviewed merely because its ID matches.

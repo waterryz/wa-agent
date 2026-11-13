@@ -12,6 +12,7 @@
 // Никакого HTTP/Telegram/WhatsApp здесь нет — только логика. Отправку
 // ответа в нужный канал делает вызывающая сторона.
 
+const {waitForStaff, replyLanguage, keepRoutineRequestInChat} = require('./channel_context');
 const agent = require('./agent');
 const astore = require('./assistant_store');
 const fastAnswers = require('./fast_answers');
@@ -178,7 +179,7 @@ async function processMessage({
     }
   }
 
-  const fast = (!hasPhoto && !faqTopic ? (require('./acute_safety').acuteSafety(text,language||'ru') || require('./verified_consultation').consultation(text,language||'ru') || require('./dialogue_policy').mileageAnswer(text,language||'ru') || require('./dialogue_policy').playfulFast(text,language||'ru')) : null) || fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
+  const fast = (!hasPhoto && !faqTopic ? (require('./acute_safety').acuteSafety(text,language||'ru') || require('./verified_consultation').consultation(text,language||'ru',channel) || require('./dialogue_policy').mileageAnswer(text,language||'ru') || require('./dialogue_policy').playfulFast(text,language||'ru')) : null) || fastAnswers.lookup({ text, topic: faqTopic, language, hasPhoto });
   if (fast) {
     await astore.saveMessage(conv.id, 'assistant', fast.text, {
       source: fast.source, version: fast.version, topic: fast.id, fast_answer: true,
@@ -235,8 +236,14 @@ async function processMessage({
   const { text: rawReply, usage, finishReason } = await agent.generateReply(systemPrompt, history);
   const generationMs = Math.round(performance.now() - generationStarted);
   let { text: replyText, escalate, reason } = agent.parseEscalation(rawReply);
+  replyText = keepRoutineRequestInChat(replyText, text, channel, language);
 
-  if(channel==='web'){if(escalate&&!/primefusioncars.com\/#contacts/.test(replyText))replyText=(replyText||'Вопрос требует проверки сотрудником компании.')+'\nКонтакты компании: https://primefusioncars.com/#contacts';escalate=false;reason='';if(!replyText)replyText='Не удалось подготовить ответ. Контакты компании: https://primefusioncars.com/#contacts';}
+  if (channel === 'web') {
+    // Anonymous site chats have no live staff handoff.
+    escalate = false;
+    reason = '';
+    if (!replyText) replyText = waitForStaff('web', replyLanguage(language, text));
+  }
   // Модель может вернуть пустоту: у kimi-k2.6 reasoning тратит те же выходные
   // токены, и на сложном вопросе лимит кончается ДО текста ответа. Раньше клиент
   // в этом случае не получал вообще ничего. Теперь — честная передача человеку.
@@ -251,7 +258,7 @@ async function processMessage({
 
   const baseText =
     replyText ||
-    (escalate ? `Вопрос сохранён для менеджмента Prime Fusion. Для связи с компанией откройте «Контакты».` : '');
+    (escalate ? waitForStaff(channel, replyLanguage(language, text)) : '');
 
   // Про отброшенные по лимиту фото клиенту надо сказать честно — иначе он решит,
   // что ассистент посмотрел всё, и не пришлёт важный кадр повторно.

@@ -11,6 +11,7 @@ const {
   parseEscalation,
 } = require('./agent');
 const store = require('./store');
+const {waitForStaff, replyLanguage, keepRoutineRequestInChat} = require('./channel_context');
 
 const AUTO_REPLY = process.env.AUTO_REPLY === 'true';
 
@@ -82,11 +83,12 @@ async function handleChat(chat) {
 
   const { examples, facts } = await retrieveContext(lastUser);
   const firstTurn = !history.some((m) => m.role === 'assistant');
-  const systemPrompt = buildSystemPrompt({ examples, facts, firstTurn });
+  const systemPrompt = buildSystemPrompt({ examples, facts, firstTurn, channel: 'whatsapp' });
   const { text: rawReply } = await generateReply(systemPrompt, history);
   const { text, escalate, reason } = parseEscalation(rawReply);
   const finalText =
-    text || (escalate ? `Передал ваш вопрос ${OWNER_NAME} — он скоро с вами свяжется.` : '');
+    keepRoutineRequestInChat(text, lastUser, 'whatsapp') ||
+    (escalate ? waitForStaff('whatsapp', replyLanguage(null, lastUser)) : '');
 
   if (!finalText) {
     console.log(`(пустой ответ Kimi для «${contactName}», пропускаю)`);

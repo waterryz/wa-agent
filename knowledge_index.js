@@ -3,7 +3,8 @@ const crypto=require('node:crypto');
 const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
 const BASE_ID=-2026103103000;
 function createKnowledgeIndex({db,embedBatch,pack,model,approvedDigest}) {
- const entries=Object.entries(pack.topics).map(([topic,t],i)=>({id:BASE_ID-i-1,topic,content:t.text}));
+ // A rule can be revised without changing the source text of its reviewed vector.
+ const entries=Object.entries(pack.topics).map(([topic,t],i)=>({id:BASE_ID-i-1,topic,content:t.indexedText || t.text}));
  const digest=hash(JSON.stringify(entries.map(({topic,content})=>({topic,content}))));
  const source='barkai-reviewed:'+pack.version+':'+digest;
  const jobSource='barkai-index-job:'+pack.version;

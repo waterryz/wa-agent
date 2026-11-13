@@ -7,6 +7,8 @@ const path = require('node:path');
 const ENDPOINT = '/messenger/webhook';
 const MAX_AGE = 24 * 60 * 60 * 1000;
 const KEEP = 7 * MAX_AGE;
+const PUBLIC_TOKEN_RECHECK = 5 * 60 * 1000;
+class InvalidPageToken extends Error {}
 const LABELS = { ru: 'Русский', en: 'English', ka: 'ქართული' };
 const WELCOME = 'Здравствуйте! Я Баркай, виртуальный помощник Prime Fusion. Расскажу об условиях аренды и помогу заполнить заявку.';
 const INVITATION = { ru: 'Чем могу помочь?', en: 'How can I help?', ka: 'რით შემიძლია დაგეხმაროთ?' };
@@ -145,13 +147,30 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       const skip = () => exec("UPDATE messenger_inbox SET state='skipped' WHERE seq=?",row.seq);
       if (!live()) { skip(); return true; }
       const session = get('SELECT * FROM messenger_session WHERE page=? AND sender=?',pageId,row.sender);
-      let locale = session.locale, pending = session.pending, output;
-      if (!session.asked || (!locale && !languageChoice(row.choice || row.text))) {
-        if (!session.asked) pending = languageChoice(row.choice || row.text) ? '' : row.text;
+      let locale = session.locale, pending = session.pending, output, openingQuestion;
+      const choice = languageChoice(row.choice || row.text);
+      if (!locale && !choice) {
+        // Some entry points send "Get started" as text before the actual question.
+        const isStart = text => /^(get started|начать|დაწყება)$/iu.test((text || '').trim());
+        if (isStart(pending)) pending = '';
+        if (row.text && !isStart(row.text)) {
+          pending = [pending, row.text].filter(Boolean).join('\n').slice(-10000);
+        }
+        const lastPrompt = session.asked && get(
+          "SELECT at FROM messenger_inbox WHERE page=? AND sender=? AND state='asked' ORDER BY seq DESC LIMIT 1",
+          pageId, row.sender
+        );
+        if (lastPrompt && row.at - lastPrompt.at < 5 * 60 * 1000) {
+          transaction(() => {
+            exec('UPDATE messenger_session SET pending=? WHERE page=? AND sender=?',pending,pageId,row.sender);
+            exec("UPDATE messenger_inbox SET state='received' WHERE seq=?",row.seq);
+          });
+          return true;
+        }
         output = languagePrompt(!session.asked);
       } else {
         const selected = !locale;
-        if (selected) locale = languageChoice(row.choice || row.text);
+        if (selected) locale = choice;
         const question = selected ? pending : row.text;
         let response = selected ? INVITATION[locale] : UNSUPPORTED[locale];
         if (question) {
@@ -162,7 +181,7 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
         }
         output = {text: response.trim()};
         // Store the actual opening question as history, not its quick-reply label.
-        if (selected) exec('UPDATE messenger_inbox SET text=? WHERE seq=?',question || '',row.seq);
+        if (selected) openingQuestion = question || '';
         pending = null;
       }
       if (!live()) { skip(); return true; }
@@ -171,12 +190,17 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       const receipt = await send(row.sender,output);
       if (typeof receipt !== 'string' || !receipt) throw Error('Missing acceptance');
       transaction(() => {
+        if (openingQuestion !== undefined) exec('UPDATE messenger_inbox SET text=? WHERE seq=?',openingQuestion,row.seq);
         exec('UPDATE messenger_session SET locale=?,pending=?,asked=1 WHERE page=? AND sender=?',locale||null,pending,pageId,row.sender);
         exec('UPDATE messenger_inbox SET state=?,reply=?,accepted_id=? WHERE seq=?',locale?'answered':'asked',output.text,receipt,row.seq);
       });
       return true;
     } catch (err) {
       if (!row) throw err;
+      if (err instanceof InvalidPageToken) {
+        exec("UPDATE messenger_inbox SET state='queued' WHERE seq=?",row.seq);
+        return false;
+      }
       transaction(() => { exec("UPDATE messenger_inbox SET state='unknown' WHERE seq=?",row.seq); hold(pageId,row.sender); });
       console.error('Messenger event held for reconciliation; automatic retry disabled');
       return false;
@@ -198,19 +222,45 @@ function mountMessenger(app,express,{env=process.env, verification=require('./ve
   });
   const pageId=env.META_PAGE_ID || '886266774570877', appId=env.META_APP_ID || '1627739205746711';
   const mount=env.RAILWAY_VOLUME_MOUNT_PATH, version=env.META_GRAPH_VERSION || 'v26.0';
-  const allowSender = id => env.META_LIVE_APPROVED==='1' || id===env.META_TEST_PSID;
-  const matchesPairing = env.META_LIVE_APPROVED!=='1' && !env.META_TEST_PSID && typeof verification.matchesPairing==='function' ? verification.matchesPairing : null;
+  // This is the Page owner's routing choice. Meta enforces app access independently.
+  const publicReplies = env.META_PUBLIC_REPLIES==='1' || env.META_LIVE_APPROVED==='1';
+  const allowSender = id => publicReplies || id===env.META_TEST_PSID;
+  const matchesPairing = !publicReplies && !env.META_TEST_PSID && typeof verification.matchesPairing==='function' ? verification.matchesPairing : null;
   let worker, pilotDb;
-  if(pageId==='886266774570877' && env.META_APP_SECRET && env.META_PAGE_ACCESS_TOKEN && /^v\d+\.\d+$/.test(version) && mount && path.isAbsolute(mount) && fs.existsSync(mount) && (matchesPairing || env.META_LIVE_APPROVED==='1' || /^\d+$/.test(env.META_TEST_PSID||''))) {
+  if(pageId==='886266774570877' && env.META_APP_SECRET && env.META_PAGE_ACCESS_TOKEN && /^v\d+\.\d+$/.test(version) && mount && path.isAbsolute(mount) && fs.existsSync(mount) && (matchesPairing || publicReplies || /^\d+$/.test(env.META_TEST_PSID||''))) {
     try {
       const {DatabaseSync}=require('node:sqlite');
       const db=new DatabaseSync(path.join(mount,'prime-fusion-messenger.sqlite'));
+      const authHeaders = {Authorization:'Bearer '+env.META_PAGE_ACCESS_TOKEN};
+      let pageReady = !publicReplies, nextCheck = 0;
+      async function confirmPage() {
+        if (pageReady) return true;
+        if (Date.now()<nextCheck) return false;
+        nextCheck = Date.now()+PUBLIC_TOKEN_RECHECK;
+        try {
+          const check = await fetchImpl(`https://graph.facebook.com/${version}/me?fields=id`,{headers:authHeaders,redirect:'error',signal:AbortSignal.timeout(15000)});
+          pageReady = check.ok && (await check.json()).id===pageId;
+        } catch { pageReady = false; }
+        console.log('Messenger Page token check:',pageReady?'ready':'waiting');
+        return pageReady;
+      }
+      if (publicReplies) console.log('Messenger routing: all eligible Page visitors');
       worker=createWorker({db,pageId,appId,allowSender,matchesPairing,answer:require('./answer.cjs').answer,
         send:async(sender,message) => {
           const r=await fetchImpl(`https://graph.facebook.com/${version}/${pageId}/messages`,{method:'POST',redirect:'error',signal:AbortSignal.timeout(15000),headers:{'Content-Type':'application/json',Authorization:'Bearer '+env.META_PAGE_ACCESS_TOKEN},body:JSON.stringify({recipient:{id:sender},messaging_type:'RESPONSE',message})});
-          if(!r.ok)throw Error('Send rejected');
+          if(!r.ok) {
+            if (publicReplies && (r.status===400 || r.status===401) && (await r.json()).error?.code===190) {
+              pageReady=false;
+              nextCheck=Date.now()+PUBLIC_TOKEN_RECHECK;
+              console.warn('Messenger token rejected; delivery paused');
+              throw new InvalidPageToken();
+            }
+            throw Error('Send rejected');
+          }
           const result=await r.json();
-          return result.recipient_id===sender && result.message_id;
+          const receipt = result.recipient_id===sender && result.message_id;
+          if (publicReplies && receipt) console.log('Messenger: Meta accepted a Page reply');
+          return receipt;
         }});
       worker.prune();
       if (matchesPairing) {
@@ -218,7 +268,7 @@ function mountMessenger(app,express,{env=process.env, verification=require('./ve
         try { console.log('Messenger owner pilot summary',JSON.stringify(pilotSummary(db,pageId))); }
         catch { console.error('Messenger owner pilot summary unavailable'); }
       }
-      const tick=()=>worker.processOne().catch(()=>console.error('Messenger worker unavailable'));
+      const tick=async()=>{try{if(await confirmPage()) await worker.processOne();}catch{console.error('Messenger worker unavailable');}};
       setInterval(tick,500).unref();
       setInterval(()=>{try{worker.prune();}catch{console.error('Messenger retention failed');}},3600000).unref();
     } catch { worker=null; console.error('Messenger worker initialization failed'); }
