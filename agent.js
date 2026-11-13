@@ -85,7 +85,7 @@ function requireEnv(name) {
 const kimi = new OpenAI({ apiKey: process.env.MOONSHOT_API_KEY, baseURL: KIMI_BASE_URL });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
-const knowledgeIndex = require('./knowledge_index').createKnowledgeIndex({db:supabase,pack:require('./knowledge_current.json'),model:EMBED_MODEL,approvedDigest:'0ff0e87554c670c0f00d2b43f9d1d82b7fa94a7a204f644322b78a0c62c9df48',embedBatch:input=>openai.embeddings.create({model:EMBED_MODEL,input},{maxRetries:0,timeout:60000})});
+const knowledgeIndex = require('./knowledge_index').createKnowledgeIndex({db:supabase,pack:require('./knowledge_current.json'),model:EMBED_MODEL,approvedDigest:'d96657765ffe68b0239b123495943c3a5b196daa4fc8e0cd39937d712148bdd5',embedBatch:input=>openai.embeddings.create({model:EMBED_MODEL,input},{maxRetries:0,timeout:60000})});
 
 
 // ── Эмбеддинг ────────────────────────────────────────────────────────

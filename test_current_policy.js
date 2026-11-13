@@ -60,7 +60,7 @@ test('all archived rows accounted for and internal content excluded',()=>{
 
 test('failed retrieval still supplies weekly payment and READY safety boundaries',()=>{
   const prompt=build([]);
-  for(const term of ['еженедельно авансом','READY','12-вольтовой','НЕ обязательный минимальный','тарифа $600 нет'])assert(prompt.includes(term),term);
+  for(const term of ['еженедельно авансом','READY','12-вольтовой','НЕ обязательный минимальный','New Style $600/неделю'])assert(prompt.includes(term),term);
   assert(!prompt.includes('предложи сделать это здесь без перехода'));
   assert(prompt.includes('по установленному рабочему каналу'));
 });

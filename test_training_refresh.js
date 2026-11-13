@@ -11,7 +11,7 @@ test('release index matches every current topic, no old vectors/search fallback'
 });
 test('reviewed context supplies intake, owner overrides and emergency guidance even if retrieval is empty',()=>{
  const text=require('./knowledge_current').publicFactsBlock([]);
- assert(text.includes('новые тарифы для новых соискателей действуют сейчас'));
+ assert(text.includes('Новые цифры предлагаются соискателям сразу'));
  assert(text.includes('девять')||text.includes('Девять'));assert(text.includes('ZIP'));assert(text.includes('911'));
  assert(text.includes('депозита $5000')||text.includes('депозит $5000'));assert(text.includes('AMS Auto Doctor'));assert(text.includes('30 календарных дней ОТ ВОЗВРАТА'));
  assert(!text.includes('Сервис KRS'));assert(!text.includes('НЕ требование депозита'));
