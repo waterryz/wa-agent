@@ -30,7 +30,8 @@ test('unreviewed admin and archived style cannot inject old business terms',()=>
 });
 test('current tariffs preserve start date and liability/deposit distinction',()=>{
   const prompt=build([]);
-  for(const term of ['2027-01-01','New Style','Old School Style','2500','3500','4500','депозита $5000 и лимита ущерба $5000'])assert(prompt.includes(term),term);
+  for(const term of ['2027-01-01','New Style','Old School Style','2500','3500','4500','Дополнительная скидка $25 в неделю','депозит $5000 и лимит ответственности за ущерб $5000','с $650 до $625 в неделю'])assert(prompt.includes(term),term);
+  assert(!prompt.includes('Добровольная скидка'));
   assert(!prompt.includes('бесплатная неделя за 6 месяцев'));
 });
 test('retired forms and absolute second-driver prohibition cannot recur',()=>{

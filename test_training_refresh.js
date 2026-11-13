@@ -6,7 +6,10 @@ test('release vectors match the indexed topic text; only current facts enter rep
  assert.equal(digest,bundle.digest);assert.equal(bundle.records.length,entries.length);
  let network=0;const index=require('./knowledge_index').createKnowledgeIndex({db:{from(){network++;throw Error('Must not query archived DB')}},embedBatch(){network++;throw Error('No paid startup build')},pack,model:bundle.model,approvedDigest:digest});
  await index.initialize();assert.equal(index.status().state,'ready');assert.equal(network,0);
- const results=await index.search(bundle.records.find(r=>r.topic==='rates').embedding,{limit:1});assert.equal(results[0].topic,'rates');assert.equal(results[0].content,pack.topics.rates.text);
+ const results=await index.search(bundle.records.find(r=>r.topic==='rates').embedding,{limit:1});assert.equal(results[0].topic,'rates');assert.equal(results[0].content,pack.topics.rates.indexedText);
+ const [rates]=require('./knowledge_current').projectFacts(results).facts.filter(row=>row.topic==='rates');
+ assert.match(rates.content,/Дополнительная скидка/);
+ assert.doesNotMatch(rates.content,/Добровольная скидка/);
  for(const row of bundle.records)assert.equal(row.content,pack.topics[row.topic].indexedText || pack.topics[row.topic].text);
 });
 test('reviewed context supplies intake, owner overrides and emergency guidance even if retrieval is empty',()=>{
