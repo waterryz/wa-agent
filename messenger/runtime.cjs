@@ -10,9 +10,10 @@ const KEEP = 7 * MAX_AGE;
 const PUBLIC_TOKEN_RECHECK = 5 * 60 * 1000;
 class InvalidPageToken extends Error {}
 const LABELS = { ru: 'Русский', en: 'English', ka: 'ქართული' };
-const WELCOME = 'Здравствуйте! Я Баркай, виртуальный помощник Prime Fusion. Расскажу об условиях аренды и помогу заполнить заявку.';
+const WELCOME = 'Hi! I’m BarkAi, Prime Fusion’s virtual rental assistant.\nЗдравствуйте! Я Баркай, виртуальный помощник Prime Fusion по аренде.\nგამარჯობა! მე ვარ BarkAi, Prime Fusion-ის ვირტუალური ასისტენტი მანქანის ქირაობის საკითხებში.';
 const INVITATION = { ru: 'Чем могу помочь?', en: 'How can I help?', ka: 'რით შემიძლია დაგეხმაროთ?' };
 const UNSUPPORTED = { ru: 'Пожалуйста, напишите вопрос текстом.', en: 'Please send your question as text.', ka: 'გთხოვთ, კითხვა ტექსტურად მომწეროთ.' };
+const HANDOFF = { ru: 'Сейчас я не могу ответить. Пожалуйста, дождитесь ответа сотрудника в этом чате.', en: 'I can’t answer that right now. Please wait here for a team member to reply.', ka: 'ამჟამად პასუხს ვერ გაგცემთ. გთხოვთ, თანამშრომლის პასუხს ამ ჩატში დაელოდოთ.' };
 
 function validSignature(raw, signature, secret) {
   if (!Buffer.isBuffer(raw) || !/^sha256=[a-f\d]{64}$/.test(signature || '')) return false;
@@ -23,6 +24,21 @@ function validSignature(raw, signature, secret) {
 function languageChoice(text) {
   const value = String(text || '').trim().toLowerCase();
   return Object.keys(LABELS).find(code => [code, `language:${code}`, LABELS[code].toLowerCase()].includes(value));
+}
+
+function isStart(text) {
+  return /^(?:get started|начать|დაწყება)$/iu.test((text || '').trim());
+}
+
+// Use recognizable language, since names, model numbers and prices occur in all three.
+function questionLanguage(text) {
+  if (/\p{Script=Georgian}{2,}/u.test(text)) return 'ka';
+  const words = text.toLowerCase().match(/\p{L}+/gu) || [];
+  const russianWord = /^(?:как|какой|какая|какие|какое|какого|каком|это|сколько|что|когда|где|куда|почему|могу|можно|можете|хочу|нужн[аоы]|есть|ли|привет|здравствуйте|вопрос|машин[ауы]|аренд[ауы]|цен[ауы]|доступна|свободна|стоит|спасибо|добр(?:ый|ое)|условия|пробег|недел[юяи]|автомобиль)$/u;
+  if (!/[іїєґўђљњћџј]/iu.test(text) && words.some(word => russianWord.test(word))) return 'ru';
+  const englishWord = /^(?:hi|hello|hey|what|which|when|where|why|who|how|is|are|can|could|would|does|the|my|your|have|any|cars?|vehicles?|available|rent|rental|looking|need|want|interested|price|pricing|mileage|weekly|week|thanks|please)$/u;
+  if (words.some(word => englishWord.test(word))) return 'en';
+  return null;
 }
 
 function languagePrompt(first) {
@@ -101,7 +117,13 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       for (const entry of payload.entry) {
         if (entry?.id !== pageId || !Array.isArray(entry.messaging)) continue;
         for (const event of entry.messaging) {
-          const message = event?.message;
+          const postback = event?.postback;
+          let message = event?.message;
+          if (!message && isStart(postback?.title)) {
+            // A postback can lack a mid. Use its signed event identity across redelivery.
+            const mid = postback.mid || `start:${event.sender?.id}:${event.timestamp}`;
+            message = {mid, text: 'Get started'};
+          }
           if (message?.is_echo) {
             const recipient = event.recipient?.id;
             if (event.sender?.id === pageId && typeof recipient === 'string' && allowed(recipient) && String(message.app_id || '') !== appId) {
@@ -147,15 +169,13 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       const skip = () => exec("UPDATE messenger_inbox SET state='skipped' WHERE seq=?",row.seq);
       if (!live()) { skip(); return true; }
       const session = get('SELECT * FROM messenger_session WHERE page=? AND sender=?',pageId,row.sender);
-      let locale = session.locale, pending = session.pending, output, openingQuestion;
+      let pending = isStart(session.pending) ? '' : session.pending;
+      let output, openingQuestion, handoff = false;
       const choice = languageChoice(row.choice || row.text);
-      if (!locale && !choice) {
-        // Some entry points send "Get started" as text before the actual question.
-        const isStart = text => /^(get started|начать|დაწყება)$/iu.test((text || '').trim());
-        if (isStart(pending)) pending = '';
-        if (row.text && !isStart(row.text)) {
-          pending = [pending, row.text].filter(Boolean).join('\n').slice(-10000);
-        }
+      const text = choice || isStart(row.text) ? '' : row.text.trim();
+      if (!session.locale && text) pending = [pending, text].filter(Boolean).join('\n').slice(-10000);
+      const locale = choice || session.locale || (text && (questionLanguage(text) || questionLanguage(pending)));
+      if (!locale) {
         const lastPrompt = session.asked && get(
           "SELECT at FROM messenger_inbox WHERE page=? AND sender=? AND state='asked' ORDER BY seq DESC LIMIT 1",
           pageId, row.sender
@@ -169,19 +189,22 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
         }
         output = languagePrompt(!session.asked);
       } else {
-        const selected = !locale;
-        if (selected) locale = choice;
-        const question = selected ? pending : row.text;
-        let response = selected ? INVITATION[locale] : UNSUPPORTED[locale];
+        const question = session.locale ? text : pending;
+        let response = choice || isStart(row.text) ? INVITATION[locale] : UNSUPPORTED[locale];
         if (question) {
           const previous = db.prepare(`SELECT text,reply FROM messenger_inbox WHERE page=? AND sender=? AND state='answered' AND text<>'' ORDER BY seq DESC LIMIT 5`).all(pageId,row.sender).reverse();
           const history = previous.flatMap(turn => [{role:'user',content:turn.text},{role:'assistant',content:turn.reply}]);
-          response = await answer({pageId,sender:row.sender,locale,text:question,history});
-          if (typeof response !== 'string' || !response.trim()) throw Error('No answer');
+          try {
+            response = await answer({pageId,sender:row.sender,locale,text:question,history});
+            if (typeof response !== 'string' || !response.trim()) throw Error('No answer');
+          } catch {
+            response = HANDOFF[locale];
+            handoff = true;
+          }
         }
         output = {text: response.trim()};
         // Store the actual opening question as history, not its quick-reply label.
-        if (selected) openingQuestion = question || '';
+        if (!session.locale || choice || isStart(row.text)) openingQuestion = question || '';
         pending = null;
       }
       if (!live()) { skip(); return true; }
@@ -192,6 +215,7 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       transaction(() => {
         if (openingQuestion !== undefined) exec('UPDATE messenger_inbox SET text=? WHERE seq=?',openingQuestion,row.seq);
         exec('UPDATE messenger_session SET locale=?,pending=?,asked=1 WHERE page=? AND sender=?',locale||null,pending,pageId,row.sender);
+        if (handoff) hold(pageId,row.sender);
         exec('UPDATE messenger_inbox SET state=?,reply=?,accepted_id=? WHERE seq=?',locale?'answered':'asked',output.text,receipt,row.seq);
       });
       return true;

@@ -14,25 +14,88 @@ function rig(opts={}) {
 }
 for(const [locale,expected] of [['ru','Ответ.'],['en','Answer.'],['ka','პასუხი.']]) {
  test(`first question survives until ${locale} selection; duplicate callbacks cause no replays`,async()=>{
-  const w=rig();const question=body(event('q','Какие машины?'));w.ingest(question);w.ingest(question);await w.processOne();assert.equal(w.calls.length,0);assert.match(w.sent[0].msg.text,/^Здравствуйте! Я Баркай, виртуальный помощник Prime Fusion\..*условиях аренды.*заполнить заявку\.[\s\S]+Выберите язык/);assert.equal(w.sent[0].msg.quick_replies.length,3);
-  const choice=body(event('lang','irrelevant display',{message:{mid:'lang',quick_reply:{payload:'language:'+locale}}}));w.ingest(choice);w.ingest(choice);await w.processOne();assert.equal(w.sent.length,2);assert.equal(w.calls[0].text,'Какие машины?');assert.equal(w.calls[0].locale,locale);assert.equal(w.sent[1].msg.text,expected);
-  w.ingest(body(event('more','Ещё вопрос')));await w.processOne();assert.equal(w.sent.length,3);assert.equal(w.sent[2].msg.text,expected);assert.equal(w.calls[1].history[0].content,'Какие машины?');assert.equal(await w.processOne(),false);
+  const w=rig();const question=body(event('q','Toyota Sienna?'));w.ingest(question);w.ingest(question);await w.processOne();assert.equal(w.calls.length,0);assert.match(w.sent[0].msg.text,/BarkAi[\s\S]*Баркай[\s\S]*გამარჯობა/);assert.equal(w.sent[0].msg.quick_replies.length,3);
+  const choice=body(event('lang','irrelevant display',{message:{mid:'lang',quick_reply:{payload:'language:'+locale}}}));w.ingest(choice);w.ingest(choice);await w.processOne();assert.equal(w.sent.length,2);assert.equal(w.calls[0].text,'Toyota Sienna?');assert.equal(w.calls[0].locale,locale);assert.equal(w.sent[1].msg.text,expected);
+  w.ingest(body(event('more','Ещё вопрос')));await w.processOne();assert.equal(w.sent.length,3);assert.equal(w.sent[2].msg.text,expected);assert.equal(w.calls[1].history[0].content,'Toyota Sienna?');assert.equal(await w.processOne(),false);
  });
 }
-test('page visitor keeps the actual question after Get started and sees one language prompt', async () => {
+test('Get started then a Sienna year question and weekly-price follow-up both get English replies', async () => {
   const w = rig({allowSender: () => true});
   const visitor = {sender: {id: '2999'}};
-  const question = 'Hello, is a Sienna available?';
-  w.ingest(body(event('start', 'Get started', visitor), event('rental', question, visitor)));
+  const question = 'What year is toyota sienna white color';
+  const followup = '$600 per week';
+  w.ingest(body(event('start', 'Get started', visitor), event('rental', question, visitor), event('price', followup, visitor)));
   await w.processOne();
-  await w.processOne();
-  assert.equal(w.sent.length, 1);
-  assert.equal(w.sent[0].msg.quick_replies.length, 3);
-  w.ingest(body(event('en', 'English', visitor)));
   await w.processOne();
   assert.equal(w.sent.length, 2);
-  assert.equal(w.calls[0].text, question);
+  assert.equal(w.sent[0].msg.quick_replies.length, 3);
+  assert.deepEqual(w.calls.map(call => call.locale), ['en']);
+  await w.processOne();
+  assert.equal(w.sent.length, 3);
+  assert.deepEqual(w.calls.map(call => [call.locale, call.text]), [['en', question], ['en', followup]]);
+  assert.equal(w.calls[1].history[0].content, question);
   assert.equal(w.sent[1].id, visitor.sender.id);
+});
+
+test('a direct question is answered in its language, with no click or language gate', async () => {
+  for (const [locale, question] of [['en','Is the car available?'], ['ru','Какого года белая Sienna?'], ['ka','რომელი წლისაა თეთრი Toyota Sienna?']]) {
+    const w=rig();
+    w.ingest(body(event('direct', question)));
+    await w.processOne();
+    assert.deepEqual(w.calls.map(call => [call.locale,call.text]), [[locale,question]]);
+    assert.equal(w.sent.length,1);
+    assert.equal(w.sent[0].msg.quick_replies,undefined);
+  }
+});
+
+test('ambiguous and unsupported openings are kept until a clear question or explicit choice', async () => {
+  const w=rig();
+  for (const [mid,text] of [['1','Sienna'],['2','¿Cuánto cuesta?'],['3','How much per week?']]) {
+    w.ingest(body(event(mid,text)));
+    await w.processOne();
+  }
+  assert.equal(w.sent.length,2);
+  assert.deepEqual(w.calls.map(call => [call.locale,call.text]), [['en','Sienna\n¿Cuánto cuesta?\nHow much per week?']]);
+  w.ingest(body(event('switch','Русский'),event('next','600?')));
+  await w.processOne();await w.processOne();
+  assert.equal(w.calls.length,2);
+  assert.equal(w.calls[1].locale,'ru');
+  assert.equal(w.calls[1].text,'600?');
+});
+
+test('legacy pending rental questions are answered once on the next message or explicit language choice', async () => {
+  const pending = 'What year is toyota sienna white color\n$600 per week';
+  for (const [next, expectedLocale, expectedText] of [['?', 'en', pending+'\n?'], ['Русский', 'ru', pending]]) {
+    const w=rig();
+    w.db.prepare('INSERT INTO messenger_session(page,sender,pending,asked,last_seen) VALUES(?,?,?,1,?)')
+      .run(page,sender,pending,ts);
+    assert.equal(await w.processOne(),false);
+    w.ingest(body(event('followup',next),event('followup',next)));
+    await w.processOne();
+    assert.deepEqual(w.calls.map(call => [call.locale,call.text]), [[expectedLocale,expectedText]]);
+    assert.equal(w.db.prepare('SELECT pending FROM messenger_session').get().pending,null);
+    assert.equal(await w.processOne(),false);
+  }
+});
+
+test('a recognized Get Started postback and retries yield one prompt; unrelated postbacks are ignored', async () => {
+  const w=rig();
+  const click={sender:{id:sender},recipient:{id:page},timestamp:ts,postback:{title:'Get Started',payload:'configured_by_page'}};
+  w.ingest(body(click,click,{...click,postback:{mid:'other-button',title:'Other',payload:'other'}}));
+  await w.processOne();assert.equal(await w.processOne(),false);
+  assert.equal(w.sent[0].msg.quick_replies.length,3);
+  w.ingest(body(event('question','Какие условия?')));
+  await w.processOne();
+  assert.equal(w.calls[0].text,'Какие условия?');
+});
+
+test('a failed answer receives one in-chat handoff and no subsequent automatic message', async () => {
+  const w=rig({answer:async()=>{throw Error('generation failed')}});
+  w.ingest(body(event('question','Can I rent?'),event('more','Hello?')));
+  await w.processOne();
+  assert.match(w.sent[0].msg.text,/wait here for a team member/);
+  assert.equal(await w.processOne(),false);
+  assert.equal(w.db.prepare('SELECT hold FROM messenger_session').get().hold,1);
 });
 
 test('paired owner only, one winner, test code removed before storage and engine',async()=>{
@@ -150,11 +213,7 @@ test('public webhook keeps two visitors queued across Page token failures and an
   await tick();
   await tick();
   assert.deepEqual(deliveries.map(d => d.recipient.id), visitors);
-  assert.ok(deliveries.every(d => d.message.quick_replies.length === 3));
-  submit('language-', ['English', 'English']);
-  await tick();
-  await tick();
-  assert.deepEqual(answers.mock.calls.map(call => call.arguments[0].text), questions);
-  assert.deepEqual(deliveries.slice(2).map(d => [d.recipient.id, d.message.text]),
+  assert.deepEqual(answers.mock.calls.map(call => call.arguments[0].text), [questions[0], ...questions]);
+  assert.deepEqual(deliveries.map(d => [d.recipient.id, d.message.text]),
                    visitors.map((id, i) => [id, 'Reply to ' + questions[i]]));
 });
