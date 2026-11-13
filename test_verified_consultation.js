@@ -21,3 +21,9 @@ test('ambiguous warning and onboarding never grant unsafe movement or invent sub
  assert.match(consultation('Я впервые у вас на сайте, с чего начать?').text,/На каком языке/);
  assert.match(consultation('Хочу оставить заявку').text,/заявку не отправлял/);
 });
+
+test('numeric monthly mileage reaches the calculator instead of a generic tariff list',()=>{
+ const q='У меня 3200 миль в месяц. Какой тариф подойдёт и сколько стоит?';
+ assert.equal(consultation(q),null);
+ assert.match(require('./dialogue_policy').mileageAnswer(q).text,/\$625\/неделю — 3500 миль/);
+});
