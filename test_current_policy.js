@@ -15,6 +15,7 @@ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'agent.js'),'utf8'), {
     if(name==='dotenv')return {config(){}};
     if(name==='openai')return class {constructor(){this.chat={completions:{create:blocked}};this.embeddings={create:blocked};}};
     if(name==='@supabase/supabase-js')return {createClient:()=>({rpc:blocked,from:blocked})};
+    if(name==='./prospect_policy')return require('./prospect_policy');
     if(name==='./channel_context')return require('./channel_context');
     if(name==='./knowledge_current')return knowledge;
     if(name==='./knowledge_current.json')return pack;
@@ -65,3 +66,5 @@ test('failed retrieval still supplies weekly payment and READY safety boundaries
   assert(!prompt.includes('предложи сделать это здесь без перехода'));
   assert(prompt.includes('по установленному рабочему каналу'));
 });
+
+test('prospect presentation and office address override older opening examples',()=>{const prompt=build([]);assert.match(prompt,/OWNER SALES PRESENTATION UPDATE/);assert.match(prompt,/76 Battery Ave/);assert.match(prompt,/annual rental bonus credit of \$1,500/);assert.match(prompt,/Do not volunteer deposits/);});

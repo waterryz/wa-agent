@@ -39,12 +39,13 @@ module.exports={POLICY,mileageContext};
 const pricingTimeline = "Для новых арендаторов эта сетка уже действует. Для действующих арендаторов до 31 декабря 2026 года включительно действуют прежние условия, переход на новую сетку — с 1 января 2027 года.";
 module.exports.pricingTimeline = pricingTimeline;
 function mileageAnswer(text,language='ru'){
+ const office=require('./prospect_policy').officeAnswer(text,language);if(office)return office;
  const verified=verifiedRuleAnswer(text,language);if(verified)return verified;
  if(language!=='ru'||!/(?:тариф|вариант).*(?:подойд|выбра|посовет|лучше)|(?:подойд|выбра|посовет|лучше).*тариф/i.test(text)||/(?:долг|оплатил|верните|платёж|платеж|списал|договоре)/i.test(text))return null;
  const c=mileageContext(text);if(!c)return null;const j=JSON.parse(c.slice(c.indexOf('{'),c.lastIndexOf('}')+1));
  const choose=a=>a.find(x=>x.monthly_limit==='unlimited'||x.monthly_limit>=j.monthly_miles);
  const next=choose(j.new_applicant_current),fmt=p=>'$'+p.weekly+'/неделю — '+(p.monthly_limit==='unlimited'?'безлимитный пробег':p.monthly_limit+' миль/месяц, без перепробега');
- const textOut='При пробеге '+j.monthly_miles+' миль в месяц по новой сетке подходит '+(next.monthly_limit==='unlimited'?'Old School Style — ':'New Style — ')+fmt(next)+'.\n\n'+pricingTimeline+' Для проверки личного платежа сверьтесь с подписанным договором и начислениями. Бонусы New Style начинаются 1 января 2027 года. Дополнительная скидка $25 в неделю на New Style 4500 и Old School Style снижает цену каждого с $650 до $625 в неделю. Для этого арендатор выбирает два условия вместе: депозит $5000 и лимит ответственности за ущерб $5000. Этот выбор необязателен.';
+ const textOut='При пробеге '+j.monthly_miles+' миль в месяц по новой сетке подходит '+(next.monthly_limit==='unlimited'?'Old School Style — ':'New Style — ')+fmt(next)+'.\n\n'+pricingTimeline+' Для проверки личного платежа сверьтесь с подписанным договором и начислениями. Бонусная программа New Style — $1500 бонусного кредита за год по правилам программы; начало 1 января 2027 года.';
  return {id:'calculated_mileage',text:textOut,source:'Reviewed dated tariff table; deterministic arithmetic',version:'2026-11-13.2',action:null};
 }
 function playful(text){return String(text).length<350&&!/(?:сломал|авари|травм|срочно|болит|пожар|не завод|скрыт.*инструк|чуж.*данн|пароль)/i.test(text)&&/(?:марсиан|воображаем|вампир|самооценк|ведр.*обещан|аренд.*половин|половин.*машин|зарабатыва.*сам|сама зарабатывает|ручн.*клад|накрою.*одометр|одометр.*полотен|по запах|прошивк|залить.*кофе|кофе.*гибрид|объеду Землю|назову машин|похуде|испачкал дождь|до конца моей жизни|29 февраля|аренд.*улыбк|улыбк.*сдача|задним ходом.*мили)/i.test(text);}
