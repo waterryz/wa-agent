@@ -14,19 +14,19 @@ const PRICE_OVERVIEW = {
     'New Style weekly rates by monthly mileage:',
     '2,500 miles — $600\n3,500 miles — $625\n4,500 miles — $650',
     'Old School Style is $650 per week with unlimited mileage and no bonus.',
-    'New Style offers $1,500 in annual rental bonus credit under the bonus program, starting January 1, 2027.'
+    'New Style offers a $1,500 annual bonus, starting January 1, 2027. Details are on our website, or I can explain them here.'
   ],
   ru: [
     'New Style — недельная цена зависит от пробега в месяц:',
     '2 500 миль — $600\n3 500 миль — $625\n4 500 миль — $650',
     'Old School Style — $650 в неделю, безлимитный пробег, без бонуса.',
-    'New Style — $1 500 бонусного кредита за год по правилам бонусной программы. Программа начинается 1 января 2027 года.'
+    'В программе New Style — бонус $1 500 в год с 1 января 2027 года. Подробности есть на сайте, или я могу рассказать здесь.'
   ],
   ka: [
     'New Style-ის ყოველკვირეული ფასი თვიურ გარბენზეა დამოკიდებული:',
     '2 500 მილი — $600\n3 500 მილი — $625\n4 500 მილი — $650',
     'Old School Style კვირაში $650 ღირს, გარბენი შეუზღუდავია, ბონუსი არ მოქმედებს.',
-    'New Style-ის ბონუს პროგრამით წელიწადში $1 500 ბონუს კრედიტი გროვდება პროგრამის პირობებით. პროგრამა იწყება 2027 წლის 1 იანვარს.'
+    'New Style-ის პროგრამაში წლიური ბონუსია $1 500, 2027 წლის 1 იანვრიდან. დეტალები საიტზეა, ან შემიძლია აქ აგიხსნათ.'
   ]
 };
 

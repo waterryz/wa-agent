@@ -67,4 +67,13 @@ test('failed retrieval still supplies weekly payment and READY safety boundaries
   assert(prompt.includes('по установленному рабочему каналу'));
 });
 
-test('prospect presentation and office address override older opening examples',()=>{const prompt=build([]);assert.match(prompt,/OWNER SALES PRESENTATION UPDATE/);assert.match(prompt,/76 Battery Ave/);assert.match(prompt,/annual rental bonus credit of \$1,500/);assert.match(prompt,/Do not volunteer deposits/);});
+test('prospect presentation and office address override older opening examples',()=>{const prompt=build([]);assert.match(prompt,/OWNER SALES PRESENTATION UPDATE/);assert.match(prompt,/76 Battery Ave/);assert.match(prompt,/annual bonus of \$1,500/);assert.match(prompt,/Do not volunteer deposits/);});
+
+test('the final public system prompt carries the simple-bonus rule and preserves direct answers',()=>{
+ const prompt=build([]);
+ assert.match(prompt,/OWNER BONUS PRESENTATION UPDATE 2026-11-14.2/);
+ assert.match(prompt,/Do not volunteer the phrases/);
+ assert.match(prompt,/visitor directly asks whether cash is paid/);
+ assert.match(prompt,/bonus is a cash payment/);
+ assert.match(prompt,/January 1, 2027 start date/);
+});

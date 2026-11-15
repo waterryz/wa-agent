@@ -18,6 +18,8 @@ for (const [locale, question, discount] of [
     assert.match(reply, /3[ ,]500/);
     assert.match(reply, /4[ ,]500/);
     assert.match(reply, /\$1[ ,]500/);
+    assert.doesNotMatch(reply, /не налич|бонусного кредита|not cash|non.cash|rental (?:bonus )?credit|ბონუს კრედიტ/iu);
+    assert.match(reply, /могу рассказать|I can explain|შემიძლია აქ აგიხსნათ/u);
     assert.doesNotMatch(reply, /\$5[ ,]000|\$1[ ,]000/);
     assert.ok(reply.endsWith('https://primefusioncars.com/?lang=' + locale + '#rates'));
     assert.doesNotMatch(reply, /\*\*|добровольная скидка/i);
@@ -65,3 +67,15 @@ test('explicit deposit questions retain accurate reference and request-based pre
 });
 
 test('office guidance uses owner clarification and advance staff confirmation',()=>{const {PROSPECT_POLICY,officeAnswer}=require('../prospect_policy');assert.match(officeAnswer('I will come to visit office','en').text,/no separate walk-in office/);assert.match(officeAnswer('Where is office?','en').text,/at least two hours/);assert.match(PROSPECT_POLICY,/broker does not work on weekends/);assert.match(PROSPECT_POLICY,/without a successful corresponding tool receipt/);});
+
+test('a direct cash-redemption question still requests an accurate answer rather than a sales deflection',async()=>{
+ let called=false;
+ const answer=createAnswer({policy,projectFacts,retrieveContext:async()=>({facts:[]}),generate:async(system)=>{
+   called=true;
+   assert.match(system,/visitor directly asks whether cash is paid/);
+   assert.match(system,/it is rental credit, not a cash payout/);
+   return {text:'It is rental credit, not a cash payout. I can explain how redemption works.'};
+ }});
+ const result=await answer({locale:'en',text:'Can I get this bonus in cash?'});
+ assert.equal(called,true);assert.match(result,/not a cash payout/);
+});
