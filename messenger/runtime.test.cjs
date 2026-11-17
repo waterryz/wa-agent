@@ -9,16 +9,20 @@ function event(mid,text,opts={}) {return {sender:{id:sender},recipient:{id:page}
 function body(...messaging){return {object:'page',entry:[{id:page,messaging}]};}
 function rig(opts={}) {
  const db=opts.db || new DatabaseSync(':memory:'),calls=[],sent=[];
- const worker=createWorker({db,pageId:page,appId:app,now:()=>ts,allowSender:id=>id===sender,answer:async args=>{calls.push(args);return {ru:'Ответ.',en:'Answer.',ka:'პასუხი.'}[args.locale]},send:async(id,msg)=>{sent.push({id,msg});return 'accepted-test'},...opts});
+ const worker=createWorker({db,pageId:page,appId:app,now:()=>ts,allowSender:id=>id===sender,answer:async args=>{calls.push(args);return {ru:'Ответ.',en:'Answer.',ka:'პასუხი.',auto:'Automatic-language answer.'}[args.locale]},send:async(id,msg)=>{sent.push({id,msg});return 'accepted-test'},...opts});
  return {db,calls,sent,...worker};
 }
 for(const [locale,expected] of [['ru','Ответ.'],['en','Answer.'],['ka','პასუხი.']]) {
- test(`first question survives until ${locale} selection; duplicate callbacks cause no replays`,async()=>{
-  const w=rig();const question=body(event('q','Toyota Sienna?'));w.ingest(question);w.ingest(question);await w.processOne();assert.equal(w.calls.length,0);assert.match(w.sent[0].msg.text,/BarkAi[\s\S]*Баркай[\s\S]*გამარჯობა/);assert.equal(w.sent[0].msg.quick_replies.length,3);
-  const choice=body(event('lang','irrelevant display',{message:{mid:'lang',quick_reply:{payload:'language:'+locale}}}));w.ingest(choice);w.ingest(choice);await w.processOne();assert.equal(w.sent.length,2);assert.equal(w.calls[0].text,'Toyota Sienna?');assert.equal(w.calls[0].locale,locale);assert.equal(w.sent[1].msg.text,expected);
-  w.ingest(body(event('more','Ещё вопрос')));await w.processOne();assert.equal(w.sent.length,3);assert.equal(w.sent[2].msg.text,expected);assert.equal(w.calls[1].history[0].content,'Toyota Sienna?');assert.equal(await w.processOne(),false);
+ test(`unrecognized opening is answered immediately and ${locale} choice controls follow-ups without replay`,async()=>{
+  const w=rig();w.ingest(body(event('q','Toyota Sienna?'),event('q','Toyota Sienna?')));await w.processOne();
+  assert.equal(w.calls.length,1);assert.equal(w.calls[0].locale,'auto');assert.equal(w.calls[0].firstContact,true);assert.equal(w.sent.length,1);
+  const choice=body(event('lang','irrelevant display',{message:{mid:'lang',quick_reply:{payload:'language:'+locale}}}));w.ingest(choice);w.ingest(choice);await w.processOne();
+  assert.equal(w.calls.length,1);assert.equal(w.sent.length,2);
+  w.ingest(body(event('more','Ещё вопрос')));await w.processOne();assert.equal(w.sent.length,3);assert.equal(w.sent[2].msg.text,expected);
+  assert.equal(w.calls[1].locale,locale);assert.equal(w.calls[1].history[0].content,'Toyota Sienna?');assert.equal(w.calls[1].firstContact,false);assert.equal(await w.processOne(),false);
  });
 }
+
 test('Get started then a Sienna year question and weekly-price follow-up both get English replies', async () => {
   const w = rig({allowSender: () => true});
   const visitor = {sender: {id: '2999'}};
@@ -48,20 +52,18 @@ test('a direct question is answered in its language, with no click or language g
   }
 });
 
-test('ambiguous and unsupported openings are kept until a clear question or explicit choice', async () => {
+test('unrecognized languages and short follow-ups receive answers without a language-button gate', async () => {
   const w=rig();
-  for (const [mid,text] of [['1','Sienna'],['2','¿Cuánto cuesta?'],['3','How much per week?']]) {
-    w.ingest(body(event(mid,text)));
-    await w.processOne();
-  }
-  assert.equal(w.sent.length,2);
-  assert.deepEqual(w.calls.map(call => [call.locale,call.text]), [['en','Sienna\n¿Cuánto cuesta?\nHow much per week?']]);
-  w.ingest(body(event('switch','Русский'),event('next','600?')));
-  await w.processOne();await w.processOne();
-  assert.equal(w.calls.length,2);
-  assert.equal(w.calls[1].locale,'ru');
-  assert.equal(w.calls[1].text,'600?');
+  for (const [mid,text] of [['1','Sienna'],['2','¿Cuánto cuesta?'],['3','How much per week?']]) {w.ingest(body(event(mid,text)));await w.processOne();}
+  assert.equal(w.sent.length,3);
+  assert.deepEqual(w.calls.map(call=>[call.locale,call.text]),[['auto','Sienna'],['auto','¿Cuánto cuesta?'],['auto','How much per week?']]);
+  w.ingest(body(event('switch','Русский'),event('next','600?')));await w.processOne();await w.processOne();
+  assert.equal(w.calls.length,4);assert.equal(w.calls[3].locale,'ru');assert.equal(w.calls[3].text,'600?');
 });
+
+for(const opening of ['Asalom aleykum','Moshina arendaga bormi','машын аренда ест','👋']) {
+ test('first-contact regression: '+opening,async()=>{const w=rig();w.ingest(body(event('q',opening)));await w.processOne();assert.equal(w.sent.length,1);assert.equal(w.calls.length,1);assert.equal(w.calls[0].firstContact,true);assert.equal(w.db.prepare('SELECT hold FROM messenger_session').get().hold,0);});
+}
 
 test('legacy pending rental questions are answered once on the next message or explicit language choice', async () => {
   const pending = 'What year is toyota sienna white color\n$600 per week';
@@ -128,7 +130,7 @@ test('owner diagnostics are read-only and omit all unrelated traffic and identif
  assert.deepEqual({...pilotSummary(w.db,page)},{paired:0,session_asked:0,session_hold:0,asked:0,answered:0,queued:0,unknown:0,skipped:0});
  w.ingest(body(owner)); await w.processOne();w.ingest(body(event('stop','STOP')));
  w.db.exec('PRAGMA query_only=ON');
- assert.deepEqual({...pilotSummary(w.db,page)},{paired:1,session_asked:1,session_hold:1,asked:1,answered:0,queued:1,unknown:0,skipped:0});
+ assert.deepEqual({...pilotSummary(w.db,page)},{paired:1,session_asked:1,session_hold:1,asked:0,answered:1,queued:1,unknown:0,skipped:0});
  const logs=t.mock.method(console,'log',()=>{});
  const payload=body(other,owner);payload.entry[0].standby=[owner,other];
  logPilotEnvelope(w.db,page,payload,matches);

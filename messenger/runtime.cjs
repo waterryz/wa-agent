@@ -42,7 +42,7 @@ function questionLanguage(text) {
 }
 
 function languagePrompt(first) {
-  const prompt = 'Выберите язык общения / Choose your language / აირჩიეთ ენა';
+  const prompt = 'Выберите удобный язык / Choose your language / აირჩიეთ ენა. Можно написать на любом языке, в том числе по-узбекски / You may write in any language.';
   return {
     text: first ? WELCOME + '\n\n' + prompt : prompt,
     quick_replies: Object.entries(LABELS).map(([code, title]) => ({ content_type: 'text', title, payload: `language:${code}` }))
@@ -174,7 +174,7 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
       const choice = languageChoice(row.choice || row.text);
       const text = choice || isStart(row.text) ? '' : row.text.trim();
       if (!session.locale && text) pending = [pending, text].filter(Boolean).join('\n').slice(-10000);
-      const locale = choice || session.locale || (text && (questionLanguage(text) || questionLanguage(pending)));
+      const locale = choice || session.locale || (text && (questionLanguage(text) || questionLanguage(pending) || 'auto'));
       if (!locale) {
         const lastPrompt = session.asked && get(
           "SELECT at FROM messenger_inbox WHERE page=? AND sender=? AND state='asked' ORDER BY seq DESC LIMIT 1",
@@ -190,15 +190,15 @@ function createWorker({ db, pageId, appId, allowSender, matchesPairing, answer, 
         output = languagePrompt(!session.asked);
       } else {
         const question = session.locale ? text : pending;
-        let response = choice || isStart(row.text) ? INVITATION[locale] : UNSUPPORTED[locale];
+        let response = choice || isStart(row.text) ? (INVITATION[locale] || INVITATION.en) : (UNSUPPORTED[locale] || UNSUPPORTED.en);
         if (question) {
           const previous = db.prepare(`SELECT text,reply FROM messenger_inbox WHERE page=? AND sender=? AND state='answered' AND text<>'' ORDER BY seq DESC LIMIT 5`).all(pageId,row.sender).reverse();
           const history = previous.flatMap(turn => [{role:'user',content:turn.text},{role:'assistant',content:turn.reply}]);
           try {
-            response = await answer({pageId,sender:row.sender,locale,text:question,history});
+            response = await answer({pageId,sender:row.sender,locale,text:question,history,firstContact:!session.asked});
             if (typeof response !== 'string' || !response.trim()) throw Error('No answer');
           } catch {
-            response = HANDOFF[locale];
+            response = HANDOFF[locale] || HANDOFF.en;
             handoff = true;
           }
         }

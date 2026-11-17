@@ -79,3 +79,15 @@ test('a direct cash-redemption question still requests an accurate answer rather
  const result=await answer({locale:'en',text:'Can I get this bonus in cash?'});
  assert.equal(called,true);assert.match(result,/not a cash payout/);
 });
+
+for(const text of ['Moshina arendaga bormi','Asalom aleykum','машын аренда ест']) {
+ test('automatic language passes the real first question to generation: '+text,async()=>{
+  let received;
+  const answer=createAnswer({policy,projectFacts,retrieveContext:async()=>({facts:[]}),generate:async(system,message)=>{
+   assert.match(system,/including Uzbek, transliteration or broken Russian/);assert.match(system,/OWNER FIRST-CONTACT UPDATE 2026-11-16/);
+   assert.match(system,/FIRST CONTACT: introduce yourself/);received=JSON.parse(message).question;
+   return {text:'Salom! Qaysi tilda gaplashish sizga qulay?'};
+  }});
+  const reply=await answer({locale:'auto',text});assert.equal(received,text);assert.match(reply,/Salom/);
+ });
+}
