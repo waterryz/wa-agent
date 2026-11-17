@@ -16,4 +16,13 @@ function officeAnswer(text, locale='ru') {
  return {id:'company_office',text:replies[locale],source:'Company handbook contact section',action:null};
 }
 const PROSPECT_POLICY = BASE_PROSPECT_POLICY + "\n" + BONUS_PRESENTATION_POLICY + "\n" + FIRST_CONTACT_POLICY;
-module.exports={PROSPECT_POLICY,officeAnswer,BONUS_PRESENTATION_POLICY,FIRST_CONTACT_POLICY};
+function offerLanguage(text,locale,question='') {
+ if(!text || /язык|language|ენაზე|რომელი ენა|qaysi til|tilda.*qulay/iu.test(text)) return text;
+ const source=String(question);
+ let offer='Which language would you prefer? You may write in your own language.';
+ if(locale==='ka'||/[\u10a0-\u10ff]/u.test(source))offer='რომელ ენაზე გირჩევნიათ საუბარი? შეგიძლიათ თქვენთვის მოსახერხებელ ენაზე მომწეროთ.';
+ else if(locale==='ru'||/[А-Яа-яЁё]/u.test(source))offer='На каком языке вам удобнее общаться? Можно написать на своём языке.';
+ else if(/\b(?:salom|as?alom|aleykum|moshina|arendaga|bormi)\b/iu.test(source))offer='Qaysi tilda gaplashish sizga qulay? O‘zbekcha ham yozishingiz mumkin.';
+ return text+'\n\n'+offer;
+}
+module.exports={PROSPECT_POLICY,officeAnswer,BONUS_PRESENTATION_POLICY,FIRST_CONTACT_POLICY,offerLanguage};

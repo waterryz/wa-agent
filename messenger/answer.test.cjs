@@ -21,7 +21,7 @@ for (const [locale, question, discount] of [
     assert.doesNotMatch(reply, /не налич|бонусного кредита|not cash|non.cash|rental (?:bonus )?credit|ბონუს კრედიტ/iu);
     assert.match(reply, /могу рассказать|I can explain|შემიძლია აქ აგიხსნათ/u);
     assert.doesNotMatch(reply, /\$5[ ,]000|\$1[ ,]000/);
-    assert.ok(reply.endsWith('https://primefusioncars.com/?lang=' + locale + '#rates'));
+    assert.ok(reply.includes('https://primefusioncars.com/?lang=' + locale + '#rates'));
     assert.doesNotMatch(reply, /\*\*|добровольная скидка/i);
   });
 }
@@ -91,3 +91,9 @@ for(const text of ['Moshina arendaga bormi','Asalom aleykum','машын аре�
   const reply=await answer({locale:'auto',text});assert.equal(received,text);assert.match(reply,/Salom/);
  });
 }
+
+test('first reply always offers a language, without requiring any particular language',async()=>{
+ const answer=createAnswer({policy,projectFacts,retrieveContext:async()=>({facts:[]}),generate:async()=>({text:'Salom!'})});
+ const reply=await answer({locale:'auto',text:'Asalom aleykum'});assert.match(reply,/Qaysi tilda/);
+ const later=await answer({locale:'auto',text:'O‘zbekcha',history:[{role:'assistant',content:'Which language?'}],firstContact:false});assert.equal(later,'Salom!');
+});
